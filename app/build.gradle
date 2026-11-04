@@ -1,0 +1,12 @@
+plugins { id 'com.android.application' }
+android {
+  namespace 'com.xiangjiaojiaozhu.englishclock'
+  compileSdk 36
+  defaultConfig {
+    applicationId 'com.xiangjiaojiaozhu.englishclock'
+    minSdk 26
+    targetSdk 35
+    versionCode 2
+    versionName '0.2.0'
+  }
+}
