@@ -1,4 +1,9 @@
-# English Clock v0.4
-Visual refresh: quiet modern minimal UI, warm-white cards, restrained blue accent, soft rounded controls, cleaner reading layout and matching vocabulary widget. Core v0.3 features remain unchanged.
+# English Clock v0.5
 
-Signing: keep app/english-clock-release.jks unchanged. v0.4 upgrades directly over v0.3.
+- Lock-screen word: the word is drawn directly onto the lock-screen wallpaper (15 / 30 / 60 min rotation)
+- New adaptive app icon (no black corners)
+- Fix: PDF import "prefix string too short"
+- Fix: ML Kit `Text` name clash, Gradle heap size
+- Minimal clean UI
+
+The signing key `app/english-clock-release.jks` is NOT included in this package. Keep the one already in the repository.

@@ -1,1 +1,5 @@
-<selector xmlns:android="http://schemas.android.com/apk/res/android"><item android:state_pressed="true"><shape><solid android:color="#164A9B"/><corners android:radius="16dp"/></shape></item><item><shape><solid android:color="#246BCE"/><corners android:radius="16dp"/></shape></item></selector>
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true"><shape><solid android:color="#1B57AD" /><corners android:radius="14dp" /></shape></item>
+    <item><shape><solid android:color="#246BCE" /><corners android:radius="14dp" /></shape></item>
+</selector>

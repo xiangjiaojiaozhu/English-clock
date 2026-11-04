@@ -1,8 +1,122 @@
 package com.xiangjiaojiaozhu.englishclock;
-import android.content.*;import android.database.*;import android.database.sqlite.*;import java.util.*;
-public class Db extends SQLiteOpenHelper{
- Db(Context c){super(c,"english_clock.db",null,1);}public void onCreate(SQLiteDatabase d){d.execSQL("create table article(id integer primary key autoincrement,title text,body text,added text)");d.execSQL("create table vocab(id integer primary key autoincrement,word text unique,zh text default '',context text,source text,added text,mastered integer default 0)");}public void onUpgrade(SQLiteDatabase d,int o,int n){}
- long addA(String t,String b){ContentValues v=new ContentValues();v.put("title",t);v.put("body",b);v.put("added",day());return getWritableDatabase().insert("article",null,v);}ArrayList<String[]> arts(){ArrayList<String[]>a=new ArrayList<>();Cursor c=getReadableDatabase().rawQuery("select id,title,body,added from article order by id desc",null);while(c.moveToNext())a.add(new String[]{c.getString(0),c.getString(1),c.getString(2),c.getString(3)});c.close();return a;}void delA(String id){getWritableDatabase().delete("article","id=?",new String[]{id});}
- boolean has(String w){Cursor c=getReadableDatabase().rawQuery("select 1 from vocab where lower(word)=lower(?)",new String[]{w});boolean x=c.moveToFirst();c.close();return x;}void toggle(String w,String x,String src){if(has(w))getWritableDatabase().delete("vocab","lower(word)=lower(?)",new String[]{w});else{ContentValues v=new ContentValues();v.put("word",w.toLowerCase());v.put("context",x);v.put("source",src);v.put("added",day());getWritableDatabase().insert("vocab",null,v);}}
- ArrayList<String[]> words(String q){ArrayList<String[]>a=new ArrayList<>();Cursor c=getReadableDatabase().rawQuery("select id,word,zh,context,source,added,mastered from vocab where word like ? or zh like ? order by mastered,id desc",new String[]{"%"+q+"%","%"+q+"%"});while(c.moveToNext())a.add(new String[]{c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5),c.getString(6)});c.close();return a;}void zh(String id,String z){ContentValues v=new ContentValues();v.put("zh",z);getWritableDatabase().update("vocab",v,"id=?",new String[]{id});}void master(String id,boolean x){ContentValues v=new ContentValues();v.put("mastered",x?1:0);getWritableDatabase().update("vocab",v,"id=?",new String[]{id});}void delW(String id){getWritableDatabase().delete("vocab","id=?",new String[]{id});}static String day(){return new java.text.SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()).format(new Date());}
+
+import android.content.ContentValues;
+import android.content.Context;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteOpenHelper;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.Locale;
+
+public class Db extends SQLiteOpenHelper {
+    public Db(Context c) {
+        super(c, "english_clock.db", null, 1);
+    }
+
+    @Override
+    public void onCreate(SQLiteDatabase d) {
+        d.execSQL("create table if not exists article(id integer primary key autoincrement,title text,body text,added text)");
+        d.execSQL("create table if not exists vocab(id integer primary key autoincrement,word text unique,zh text default '',context text,source text,added text,mastered integer default 0)");
+    }
+
+    @Override
+    public void onUpgrade(SQLiteDatabase d, int oldV, int newV) {
+        onCreate(d);
+    }
+
+    static String s(Cursor c, int i) {
+        String v = c.getString(i);
+        return v == null ? "" : v;
+    }
+
+    public long addA(String title, String body) {
+        ContentValues v = new ContentValues();
+        v.put("title", title);
+        v.put("body", body);
+        v.put("added", day());
+        return getWritableDatabase().insert("article", null, v);
+    }
+
+    public ArrayList<String[]> arts() {
+        ArrayList<String[]> out = new ArrayList<>();
+        Cursor c = getReadableDatabase().rawQuery("select id,title,body,added from article order by id desc", null);
+        while (c.moveToNext()) out.add(new String[]{s(c, 0), s(c, 1), s(c, 2), s(c, 3)});
+        c.close();
+        return out;
+    }
+
+    public void delA(String id) {
+        getWritableDatabase().delete("article", "id=?", new String[]{id});
+    }
+
+    public boolean has(String w) {
+        Cursor c = getReadableDatabase().rawQuery("select 1 from vocab where lower(word)=lower(?)", new String[]{w});
+        boolean x = c.moveToFirst();
+        c.close();
+        return x;
+    }
+
+    /** returns true if the word was added, false if removed */
+    public boolean toggle(String w, String context, String source) {
+        if (has(w)) {
+            getWritableDatabase().delete("vocab", "lower(word)=lower(?)", new String[]{w});
+            return false;
+        }
+        ContentValues v = new ContentValues();
+        v.put("word", w.toLowerCase(Locale.ROOT));
+        v.put("context", context);
+        v.put("source", source);
+        v.put("added", day());
+        getWritableDatabase().insert("vocab", null, v);
+        return true;
+    }
+
+    /** id, word, zh, context, source, added, mastered */
+    public ArrayList<String[]> words(String q) {
+        ArrayList<String[]> out = new ArrayList<>();
+        String like = "%" + q + "%";
+        Cursor c = getReadableDatabase().rawQuery(
+                "select id,word,zh,context,source,added,mastered from vocab where word like ? or zh like ? order by mastered,id desc",
+                new String[]{like, like});
+        while (c.moveToNext()) out.add(new String[]{s(c, 0), s(c, 1), s(c, 2), s(c, 3), s(c, 4), s(c, 5), s(c, 6)});
+        c.close();
+        return out;
+    }
+
+    public HashSet<String> wordSet() {
+        HashSet<String> set = new HashSet<>();
+        Cursor c = getReadableDatabase().rawQuery("select lower(word) from vocab", null);
+        while (c.moveToNext()) set.add(s(c, 0));
+        c.close();
+        return set;
+    }
+
+    public void zh(String id, String z) {
+        ContentValues v = new ContentValues();
+        v.put("zh", z);
+        getWritableDatabase().update("vocab", v, "id=?", new String[]{id});
+    }
+
+    public void zhIfEmpty(String word, String z) {
+        ContentValues v = new ContentValues();
+        v.put("zh", z);
+        getWritableDatabase().update("vocab", v, "lower(word)=lower(?) and (zh is null or zh='')", new String[]{word});
+    }
+
+    public void master(String id, boolean m) {
+        ContentValues v = new ContentValues();
+        v.put("mastered", m ? 1 : 0);
+        getWritableDatabase().update("vocab", v, "id=?", new String[]{id});
+    }
+
+    public void delW(String id) {
+        getWritableDatabase().delete("vocab", "id=?", new String[]{id});
+    }
+
+    public static String day() {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
+    }
 }

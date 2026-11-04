@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:gravity="center_vertical" android:padding="18dp" android:background="#F7F9FC" android:layout_width="match_parent" android:layout_height="match_parent">
-<TextView android:id="@+id/widget_word" android:text="English Clock" android:textSize="25sp" android:textStyle="bold" android:textColor="#1A263A" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:id="@+id/widget_zh" android:text="添加生词后显示" android:textSize="15sp" android:textColor="#6C7584" android:gravity="center_vertical" android:paddingTop="6dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:padding="18dp">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:letterSpacing="0.2" android:text="TODAY'S WORD" android:textColor="#8A94A6" android:textSize="11sp" />
+    <TextView android:id="@+id/widget_word" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:ellipsize="end" android:maxLines="1" android:paddingTop="4dp" android:text="English Clock"
+        android:textColor="#1A263A" android:textSize="24sp" android:textStyle="bold" />
+    <TextView android:id="@+id/widget_zh" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:ellipsize="end" android:maxLines="2" android:paddingTop="2dp" android:text="点一个生词，它会出现在这里"
+        android:textColor="#6C7584" android:textSize="14sp" />
 </LinearLayout>

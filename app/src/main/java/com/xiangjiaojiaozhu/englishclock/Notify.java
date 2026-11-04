@@ -1,2 +1,25 @@
-package com.xiangjiaojiaozhu.englishclock;import android.app.*;import android.content.*;import android.os.*;import java.util.*;
-public class Notify{static void word(Context c){ArrayList<String[]>a=new Db(c).words("");if(a.isEmpty())return;String[]v=a.get(new Random().nextInt(a.size()));NotificationManager n=(NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE);if(Build.VERSION.SDK_INT>=26)n.createNotificationChannel(new NotificationChannel("word","锁屏生词",NotificationManager.IMPORTANCE_LOW));Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,"word"):new Notification.Builder(c);b.setSmallIcon(R.mipmap.ic_launcher).setContentTitle(v[1]).setContentText(v[2].length()>0?v[2]:v[3]).setOngoing(true).setVisibility(Notification.VISIBILITY_PUBLIC).setContentIntent(PendingIntent.getActivity(c,1,new Intent(c,MainActivity.class),PendingIntent.FLAG_IMMUTABLE));n.notify(606,b.build());}static void stop(Context c){((NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(606);}}
+package com.xiangjiaojiaozhu.englishclock;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+
+public class Notify {
+    public static void post(Context c, int id, String channel, String channelName, int importance, String title, String text) {
+        NotificationManager n = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        n.createNotificationChannel(new NotificationChannel(channel, channelName, importance));
+        PendingIntent pi = PendingIntent.getActivity(c, id, new Intent(c, MainActivity.class),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification nt = new Notification.Builder(c, channel)
+                .setSmallIcon(R.drawable.ic_notify)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build();
+        n.notify(id, nt);
+    }
+}

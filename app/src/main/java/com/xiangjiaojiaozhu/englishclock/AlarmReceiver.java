@@ -1,2 +1,14 @@
-package com.xiangjiaojiaozhu.englishclock;import android.app.*;import android.content.*;import android.os.*;
-public class AlarmReceiver extends BroadcastReceiver{public void onReceive(Context c,Intent i){NotificationManager n=(NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE);if(Build.VERSION.SDK_INT>=26)n.createNotificationChannel(new NotificationChannel("alarm","学习提醒",NotificationManager.IMPORTANCE_HIGH));Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,"alarm"):new Notification.Builder(c);b.setSmallIcon(R.mipmap.ic_launcher).setContentTitle("English Clock").setContentText(i.getStringExtra("msg")).setAutoCancel(true);n.notify(707,b.build());}}
+package com.xiangjiaojiaozhu.englishclock;
+
+import android.app.NotificationManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+
+public class AlarmReceiver extends BroadcastReceiver {
+    @Override
+    public void onReceive(Context c, Intent i) {
+        String msg = Schedules.prefs(c).getString("alarm_msg", "背单词");
+        Notify.post(c, 707, "study_alarm", "学习提醒", NotificationManager.IMPORTANCE_HIGH, "English Clock", msg);
+    }
+}

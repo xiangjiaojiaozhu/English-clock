@@ -1,1 +1,13 @@
-package com.xiangjiaojiaozhu.englishclock;import android.content.*;public class BootReceiver extends BroadcastReceiver{public void onReceive(Context c,Intent i){Notify.word(c);}}
+package com.xiangjiaojiaozhu.englishclock;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+
+public class BootReceiver extends BroadcastReceiver {
+    @Override
+    public void onReceive(Context c, Intent i) {
+        Schedules.scheduleDaily(c);
+        Schedules.scheduleLock(c);
+    }
+}
