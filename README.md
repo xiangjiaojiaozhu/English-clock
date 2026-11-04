@@ -1,4 +1,4 @@
-# English Clock Mobile v0.2
-Core mobile port: article paste/TXT import, tap-to-save vocabulary with context, vocabulary management, focus timer, daily reminders.
+# English Clock v0.4
+Visual refresh: quiet modern minimal UI, warm-white cards, restrained blue accent, soft rounded controls, cleaner reading layout and matching vocabulary widget. Core v0.3 features remain unchanged.
 
-Build output: Actions -> Build Android APK -> Artifacts -> EnglishClock-core-v0.2-apk
+Signing: keep app/english-clock-release.jks unchanged. v0.4 upgrades directly over v0.3.

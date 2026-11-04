@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:gravity="center_vertical" android:padding="18dp" android:background="#F7F9FC" android:layout_width="match_parent" android:layout_height="match_parent">
+<TextView android:id="@+id/widget_word" android:text="English Clock" android:textSize="25sp" android:textStyle="bold" android:textColor="#1A263A" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:id="@+id/widget_zh" android:text="添加生词后显示" android:textSize="15sp" android:textColor="#6C7584" android:gravity="center_vertical" android:paddingTop="6dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+</LinearLayout>
