@@ -1,17 +1,28 @@
 name: Build Android APK
-on: { push: { branches: [ main ] }, workflow_dispatch: }
-permissions: { contents: read }
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
- build:
-  runs-on: ubuntu-latest
-  steps:
-   - uses: actions/checkout@v4
-   - uses: actions/setup-java@v5
-     with: { distribution: temurin, java-version: '17' }
-   - uses: android-actions/setup-android@v4
-   - run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-   - uses: gradle/actions/setup-gradle@v6
-     with: { gradle-version: '9.5.0', cache-provider: basic }
-   - run: gradle :app:assembleRelease --stacktrace
-   - uses: actions/upload-artifact@v4
-     with: { name: EnglishClock-v0.3-signed-apk, path: app/build/outputs/apk/release/app-release.apk, if-no-files-found: error }
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.5.0'
+          cache-provider: basic
+      - run: gradle :app:assembleRelease --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EnglishClock-v0.5-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
