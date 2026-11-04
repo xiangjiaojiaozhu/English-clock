@@ -18,10 +18,8 @@ import android.view.WindowManager;
 import java.util.ArrayList;
 import java.util.Random;
 
-/** Draws the current word directly onto the lock-screen wallpaper. */
 public class LockWallpaper {
 
-    /** @return null on success, otherwise a message for the user */
     public static String update(Context c) {
         ArrayList<String[]> all = new Db(c).words("");
         if (all.isEmpty()) return "生词本还是空的，先在文章里点几个生词";
@@ -57,7 +55,7 @@ public class LockWallpaper {
         cv.drawRect(0, 0, w, h, glow);
 
         float cx = w / 2f;
-        float y = h * 0.46f;   // leave the top for the system clock
+        float y = h * 0.46f;
 
         Paint label = center(0xFF8FA6C8, w * 0.03f, Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
         label.setLetterSpacing(0.3f);

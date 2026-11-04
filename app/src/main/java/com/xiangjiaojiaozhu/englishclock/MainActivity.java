@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.SpannableString;
@@ -57,7 +58,6 @@ public class MainActivity extends Activity {
     int tab = 0;
     final Handler h = new Handler(Looper.getMainLooper());
 
-    // focus timer
     TextView clock;
     Button startBtn;
     int focusMin = 25;
@@ -65,7 +65,6 @@ public class MainActivity extends Activity {
     boolean run = false;
     final Runnable tickR = this::tick;
 
-    // ------------------------------------------------------------ lifecycle
     @Override
     protected void onCreate(Bundle s) {
         super.onCreate(s);
@@ -77,6 +76,14 @@ public class MainActivity extends Activity {
         shell();
         go(0);
         share(getIntent());
+        Schedules.scheduleLock(this);
+        if (Schedules.prefs(this).getBoolean("card_on", false)) LockService.start(this);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (tab == 1 && body != null) words();
     }
 
     @Override
@@ -86,7 +93,6 @@ public class MainActivity extends Activity {
         share(i);
     }
 
-    // ------------------------------------------------------------ ui helpers
     int dp(float v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
@@ -224,7 +230,6 @@ public class MainActivity extends Activity {
         body.addView(s);
     }
 
-    // ------------------------------------------------------------ articles
     void home() {
         head("今日阅读", "把文章读完，也把不认识的词留下来。");
         LinearLayout r = row();
@@ -418,7 +423,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // ------------------------------------------------------------ vocabulary
     void words() {
         ArrayList<String[]> all = db.words("");
         int left = 0;
@@ -467,50 +471,72 @@ public class MainActivity extends Activity {
 
     void lockCard() {
         SharedPreferences p = Schedules.prefs(this);
-        boolean on = p.getBoolean("lock_on", false);
-        int min = p.getInt("lock_min", 30);
+        boolean on = p.getBoolean("card_on", false);
+        boolean hide = p.getBoolean("card_hide", false);
+        boolean overlay = Settings.canDrawOverlays(this);
         LinearLayout c = card();
-        TextView t = text("锁屏生词", 17, NAVY);
+        TextView t = text("锁屏单词", 17, NAVY);
         t.setTypeface(null, Typeface.BOLD);
         c.addView(t);
-        c.addView(text(on ? "已开启 · 每 " + min + " 分钟换一个词，直接显示在锁屏画面上"
-                : "开启后，生词会直接画在锁屏壁纸上，亮屏就能看到", 14, MUTED));
-        LinearLayout r1 = row();
-        for (int m : new int[]{15, 30, 60}) {
-            String label = m + " 分钟";
-            Button b = (on && m == min) ? primary(label, v -> enableLock(m)) : soft(label, v -> enableLock(m));
-            r1.addView(b, weight(1));
+        c.addView(text(on ? "已开启 · 亮屏先看到生词卡片，左右滑动换词，上滑关闭"
+                : "开启后，每次亮屏会先出现一组生词卡片，上滑关闭后再正常解锁", 14, MUTED));
+        if (!overlay) {
+            TextView warn = text("还差一步：需要允许「显示在其他应用的上层」", 14, Color.rgb(196, 60, 60));
+            warn.setPadding(0, dp(6), 0, 0);
+            c.addView(warn);
         }
+        LinearLayout r1 = row();
+        r1.addView(on ? soft("关闭", v -> setCard(false)) : primary("开启", v -> setCard(true)), weight(1));
+        r1.addView(soft("预览", v -> preview()), weight(1));
         c.addView(r1);
         LinearLayout r2 = row();
-        r2.addView(soft("立即换一个", v -> lockNow()), weight(1));
-        r2.addView(soft("关闭", v -> disableLock()), weight(1));
+        r2.addView(soft(hide ? "中文：遮住" : "中文：显示", v -> {
+            p.edit().putBoolean("card_hide", !hide).apply();
+            words();
+        }), weight(1));
+        r2.addView(soft(overlay ? "其他权限" : "去授权", v -> openPerms(overlay)), weight(1));
         c.addView(r2);
+        TextView tip = text("华为手机还需要：设置 → 应用和服务 → 应用管理 → English Clock → 权限，打开「锁屏显示」和「后台弹出界面」；"
+                + "并在「应用启动管理」里改为手动管理，允许后台活动。", 12, MUTED);
+        tip.setPadding(0, dp(6), 0, 0);
+        c.addView(tip);
         body.addView(c);
     }
 
-    void enableLock(int m) {
-        Schedules.prefs(this).edit().putBoolean("lock_on", true).putInt("lock_min", m).apply();
-        Schedules.scheduleLock(this);
-        lockNow();
-    }
-
-    void lockNow() {
-        toast("正在更新锁屏…");
-        new Thread(() -> {
-            String err = LockWallpaper.update(getApplicationContext());
-            runOnUiThread(() -> {
-                Toast.makeText(this, err == null ? "锁屏已更新，锁屏看看" : err, Toast.LENGTH_LONG).show();
-                if (tab == 1) words();
-            });
-        }).start();
-    }
-
-    void disableLock() {
-        Schedules.prefs(this).edit().putBoolean("lock_on", false).apply();
-        Schedules.scheduleLock(this);
-        Toast.makeText(this, "已停止换词。想换回原来的锁屏，请到 设置 → 桌面和壁纸 重新设置", Toast.LENGTH_LONG).show();
+    void setCard(boolean on) {
+        Schedules.prefs(this).edit().putBoolean("card_on", on).apply();
+        if (on) {
+            LockService.start(this);
+            if (!Settings.canDrawOverlays(this)) openPerms(false);
+            else Toast.makeText(this, "已开启，锁屏后再亮屏看看", Toast.LENGTH_LONG).show();
+        } else {
+            LockService.stop(this);
+            toast("已关闭");
+        }
         words();
+    }
+
+    void preview() {
+        if (db.words("").isEmpty()) {
+            toast("生词本还是空的，先在文章里点几个生词");
+            return;
+        }
+        startActivity(new Intent(this, LockActivity.class));
+    }
+
+    void openPerms(boolean overlayGranted) {
+        Uri pkg = Uri.parse("package:" + getPackageName());
+        try {
+            if (!overlayGranted) {
+                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg));
+                Toast.makeText(this, "打开「允许显示在其他应用上层」后返回", Toast.LENGTH_LONG).show();
+            } else {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg));
+                Toast.makeText(this, "在「权限」里打开「锁屏显示」和「后台弹出界面」", Toast.LENGTH_LONG).show();
+            }
+        } catch (Exception e) {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg));
+        }
     }
 
     void edit(String[] v) {
@@ -530,7 +556,6 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    // ------------------------------------------------------------ focus timer
     String fmt(long ms) {
         long s = Math.max(0, (ms + 999) / 1000);
         return String.format(Locale.ROOT, "%02d:%02d", s / 60, s % 60);
@@ -608,7 +633,6 @@ public class MainActivity extends Activity {
         h.postDelayed(tickR, 500);
     }
 
-    // ------------------------------------------------------------ daily reminder
     void alarm() {
         head("学习提醒", "给每天的英语留一个固定时间。");
         SharedPreferences p = Schedules.prefs(this);

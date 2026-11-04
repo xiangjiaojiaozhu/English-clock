@@ -39,10 +39,7 @@ public class Schedules {
     public static void scheduleLock(Context c) {
         SharedPreferences p = prefs(c);
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
-        am.cancel(lockPi(c));
-        if (!p.getBoolean("lock_on", false)) return;
-        long ms = p.getInt("lock_min", 30) * 60000L;
-        // RTC (not wakeup): changes the word the next time the phone is awake, saves battery
-        am.setInexactRepeating(AlarmManager.RTC, System.currentTimeMillis() + ms, ms, lockPi(c));
+        am.cancel(lockPi(c));   // v0.5 wallpaper rotation retired
+        p.edit().putBoolean("lock_on", false).apply();
     }
 }

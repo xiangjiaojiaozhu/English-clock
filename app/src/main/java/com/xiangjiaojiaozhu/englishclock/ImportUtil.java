@@ -105,7 +105,6 @@ public class ImportUtil {
             try (PDDocument d = PDDocument.load(f)) {
                 String t = new PDFTextStripper().getText(d);
                 if (t.replaceAll("[^A-Za-z]", "").length() >= 30) return tidy(t);
-                // scanned PDF: render each page and run on-device OCR
                 PDFRenderer r = new PDFRenderer(d);
                 TextRecognizer rec = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
                 StringBuilder s = new StringBuilder();
@@ -127,7 +126,6 @@ public class ImportUtil {
         }
     }
 
-    /** join hard line breaks inside paragraphs */
     static String tidy(String t) {
         t = t.replace("\r", "");
         t = t.replaceAll("-\\n(?=[a-z])", "");

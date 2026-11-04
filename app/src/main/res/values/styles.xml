@@ -8,4 +8,10 @@
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowBackground">@color/page_bg</item>
     </style>
+    <style name="LockTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/lock_bg</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

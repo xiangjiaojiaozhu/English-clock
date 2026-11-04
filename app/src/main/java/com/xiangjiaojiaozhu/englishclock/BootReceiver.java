@@ -9,5 +9,6 @@ public class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context c, Intent i) {
         Schedules.scheduleDaily(c);
         Schedules.scheduleLock(c);
+        if (Schedules.prefs(c).getBoolean("card_on", false)) LockService.start(c);
     }
 }
