@@ -134,7 +134,6 @@ public class LockActivity extends Activity {
         overridePendingTransition(0, android.R.anim.fade_out);
     }
 
-    /** unmastered words first, shuffled */
     void load() {
         ArrayList<String[]> all = db.words("");
         ArrayList<String[]> pool = new ArrayList<>();
@@ -227,9 +226,9 @@ public class LockActivity extends Activity {
         wordV.setGravity(Gravity.CENTER);
         card.addView(wordV, new LinearLayout.LayoutParams(-1, -2));
 
-        phV = text("", 16, 0xFF9DB0CC);
+        phV = text("", 17, 0xFFB8C7E0);
         phV.setGravity(Gravity.CENTER);
-        phV.setPadding(0, dp(4), 0, 0);
+        phV.setPadding(0, dp(6), 0, 0);
         card.addView(phV, new LinearLayout.LayoutParams(-1, -2));
 
         View line = new View(this);
@@ -297,8 +296,9 @@ public class LockActivity extends Activity {
         String[] v = words.get(idx);
         counter.setText((idx + 1) + " / " + words.size());
         wordV.setText(v[1]);
-        phV.setText(v[7]);
-        phV.setVisibility(v[7].isEmpty() ? View.GONE : View.VISIBLE);
+        String ph = v[7];
+        phV.setText(ph);
+        phV.setVisibility(ph.isEmpty() ? View.GONE : View.VISIBLE);
         String zh = v[2].isEmpty() ? "（还没有中文释义）" : v[2];
         if (hide) {
             zhV.setText("轻点显示释义");
@@ -320,7 +320,6 @@ public class LockActivity extends Activity {
         ctxV.setVisibility(v[3].isEmpty() ? View.GONE : View.VISIBLE);
     }
 
-    /** dir = 1 next, -1 previous, with a slide animation */
     void move(int dir) {
         if (animating || words.size() < 2) return;
         animating = true;

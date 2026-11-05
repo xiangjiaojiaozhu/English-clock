@@ -78,6 +78,11 @@ public class MainActivity extends Activity {
         share(getIntent());
         Schedules.scheduleLock(this);
         if (Schedules.prefs(this).getBoolean("card_on", false)) LockService.start(this);
+        backfill();
+    }
+
+    /** fills phonetics for words saved before (offline dictionary, takes a moment the first time) */
+    void backfill() {
         Phonetic.backfill(this, () -> runOnUiThread(() -> {
             WordWidget.refresh(this);
             if (tab == 1) words();
@@ -353,8 +358,8 @@ public class MainActivity extends Activity {
             sp.setSpan(new ClickableSpan() {
                 @Override
                 public void onClick(View v) {
-                    boolean added = db.toggle(w, sentence(a[2], w), a[1]);
-                    if (added) translate(w);
+                    boolean added = db.toggle(w, sentence(a[2], w), a[1], "");
+                    if (added) lookupNew(w);
                     paint(sp, a[2]);
                     tv.setText(sp);
                     WordWidget.refresh(MainActivity.this);
@@ -409,9 +414,11 @@ public class MainActivity extends Activity {
         return r.length() > 240 ? r.substring(0, 240) + "…" : r;
     }
 
-    /** looks up Chinese meaning and phonetic for a newly added word */
-    void translate(String word) {
+    /** phonetic (offline dictionary first) + Chinese meaning for a newly added word */
+    void lookupNew(String word) {
         new Thread(() -> {
+            String ph = Phonetic.lookup(this, word);
+            if (!ph.isEmpty()) db.phonetic(word, ph);
             try {
                 URL u = new URL("https://api.mymemory.translated.net/get?langpair=en%7Czh-CN&q=" + URLEncoder.encode(word, "UTF-8"));
                 HttpURLConnection c = (HttpURLConnection) u.openConnection();
@@ -422,9 +429,10 @@ public class MainActivity extends Activity {
                 if (!zh.isEmpty() && !zh.equalsIgnoreCase(word)) db.zhIfEmpty(word, zh);
             } catch (Exception ignored) {
             }
-            String ph = Phonetic.lookup(word);
-            if (!ph.isEmpty()) db.phonetic(word, ph);
-            runOnUiThread(() -> WordWidget.refresh(this));
+            runOnUiThread(() -> {
+                WordWidget.refresh(this);
+                if (tab == 1) words();
+            });
         }).start();
     }
 
@@ -453,7 +461,7 @@ public class MainActivity extends Activity {
                 TextView wv = text(v[1], 20, done ? MUTED : NAVY);
                 wv.setTypeface(null, Typeface.BOLD);
                 top.addView(wv);
-                TextView ph = text(v[7].isEmpty() ? "" : "  " + v[7], 14, MUTED);
+                TextView ph = text(v[7].isEmpty() ? "" : "  " + v[7], 15, MUTED);
                 ph.setPadding(0, 0, 0, dp(2));
                 top.addView(ph, new LinearLayout.LayoutParams(0, -2, 1));
                 if (done) top.addView(text("已掌握", 12, BLUE));
@@ -488,7 +496,7 @@ public class MainActivity extends Activity {
         t.setTypeface(null, Typeface.BOLD);
         c.addView(t);
         c.addView(text(on ? "已开启 · 亮屏先看到生词卡片，左右滑动换词，上滑关闭"
-                : "开启后，每次亮屏会先出现一组生词卡片，上滑关闭后再正常解锁", 14, MUTED));
+                : "开启后，每次亮屏会先出现生词卡片，上滑关闭后再正常解锁", 14, MUTED));
         if (!overlay) {
             TextView warn = text("还差一步：需要允许「显示在其他应用的上层」", 14, Color.rgb(196, 60, 60));
             warn.setPadding(0, dp(6), 0, 0);

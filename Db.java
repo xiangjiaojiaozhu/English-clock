@@ -25,13 +25,21 @@ public class Db extends SQLiteOpenHelper {
     @Override
     public void onUpgrade(SQLiteDatabase d, int oldV, int newV) {
         onCreate(d);
-        if (oldV < 2) {
-            try {
-                d.execSQL("alter table vocab add column phonetic text default ''");
-            } catch (Exception ignored) {
-                // column already exists
-            }
-        }
+        ensurePhoneticColumn(d);
+    }
+
+    @Override
+    public void onOpen(SQLiteDatabase d) {
+        super.onOpen(d);
+        if (!d.isReadOnly()) ensurePhoneticColumn(d);
+    }
+
+    static void ensurePhoneticColumn(SQLiteDatabase d) {
+        Cursor c = d.rawQuery("pragma table_info(vocab)", null);
+        boolean has = false;
+        while (c.moveToNext()) if ("phonetic".equals(c.getString(1))) has = true;
+        c.close();
+        if (!has) d.execSQL("alter table vocab add column phonetic text default ''");
     }
 
     static String s(Cursor c, int i) {
@@ -67,7 +75,7 @@ public class Db extends SQLiteOpenHelper {
     }
 
     /** returns true if the word was added, false if removed */
-    public boolean toggle(String w, String context, String source) {
+    public boolean toggle(String w, String context, String source, String phonetic) {
         if (has(w)) {
             getWritableDatabase().delete("vocab", "lower(word)=lower(?)", new String[]{w});
             return false;
@@ -77,6 +85,7 @@ public class Db extends SQLiteOpenHelper {
         v.put("context", context);
         v.put("source", source);
         v.put("added", day());
+        v.put("phonetic", phonetic == null ? "" : phonetic);
         getWritableDatabase().insert("vocab", null, v);
         return true;
     }
@@ -95,7 +104,6 @@ public class Db extends SQLiteOpenHelper {
         return out;
     }
 
-    /** words that still have no phonetic */
     public ArrayList<String> missingPhonetic() {
         ArrayList<String> out = new ArrayList<>();
         Cursor c = getReadableDatabase().rawQuery("select word from vocab where phonetic is null or phonetic=''", null);

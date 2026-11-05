@@ -1,15 +1,66 @@
 package com.xiangjiaojiaozhu.englishclock;
 
 import android.content.Context;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Looks up IPA phonetics: Youdao first (works in China), dictionaryapi.dev as fallback. */
+/**
+ * IPA phonetics. Uses the built-in offline dictionary (assets/phonetic.txt, ~126k words, US pronunciation)
+ * and only goes online for words that are not in it.
+ */
 public class Phonetic {
+    static HashMap<String, String> dict;
+
+    static synchronized HashMap<String, String> dict(Context c) {
+        if (dict != null) return dict;
+        HashMap<String, String> m = new HashMap<>(180000);
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(
+                c.getApplicationContext().getAssets().open("phonetic.txt"), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int t = line.indexOf('\t');
+                if (t > 0) m.put(line.substring(0, t), line.substring(t + 1));
+            }
+        } catch (Exception ignored) {
+        }
+        dict = m;
+        return dict;
+    }
+
+    static String one(HashMap<String, String> d, String w) {
+        w = w.toLowerCase(Locale.ROOT).replace('\u2019', '\'');
+        String p = d.get(w);
+        if (p != null) return p;
+        if (w.endsWith("'s")) {
+            p = d.get(w.substring(0, w.length() - 2));
+            if (p != null) return p + "z";
+        }
+        return null;
+    }
+
+    /** offline lookup; works for single words and short phrases. "" if not found */
+    public static String offline(Context c, String word) {
+        HashMap<String, String> d = dict(c);
+        String[] parts = word.trim().split("[\\s\\-]+");
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            if (part.isEmpty()) continue;
+            String p = one(d, part);
+            if (p == null) return "";
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(p);
+        }
+        return sb.length() == 0 ? "" : "/" + sb + "/";
+    }
 
     static String get(String url) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
@@ -19,7 +70,6 @@ public class Phonetic {
         return ImportUtil.stream(c.getInputStream());
     }
 
-    /** depth-first search for the first non-empty string value of one of the keys */
     static String find(Object o, String key) {
         if (o instanceof JSONObject) {
             JSONObject j = (JSONObject) o;
@@ -50,23 +100,9 @@ public class Phonetic {
         return p;
     }
 
-    /** returns "" when nothing found or offline */
-    public static String lookup(String word) {
-        String q;
+    static String online(String word) {
         try {
-            q = URLEncoder.encode(word, "UTF-8");
-        } catch (Exception e) {
-            return "";
-        }
-        try {
-            Object j = new JSONObject(get("https://dict.youdao.com/jsonapi?q=" + q));
-            String p = find(j, "usphone");
-            if (p == null) p = find(j, "ukphone");
-            if (p == null) p = find(j, "phone");
-            if (p != null) return slash(p);
-        } catch (Exception ignored) {
-        }
-        try {
+            String q = URLEncoder.encode(word, "UTF-8");
             Object j = new JSONArray(get("https://api.dictionaryapi.dev/api/v2/entries/en/" + q));
             String p = find(j, "phonetic");
             if (p == null) p = find(j, "text");
@@ -76,29 +112,35 @@ public class Phonetic {
         return "";
     }
 
-    /** fill phonetics for all words that are still missing them; runs on a background thread */
+    /** offline first, then online. Must not be called on the UI thread. */
+    public static String lookup(Context c, String word) {
+        String p = offline(c, word);
+        return p.isEmpty() ? online(word) : p;
+    }
+
     static volatile boolean running = false;
 
+    /** fill phonetics for all words that are still missing them; background thread */
     public static void backfill(Context c, Runnable done) {
         if (running) return;
         running = true;
         final Context app = c.getApplicationContext();
         new Thread(() -> {
-          try {
-            Db db = new Db(app);
-            ArrayList<String> ws = db.missingPhonetic();
-            boolean any = false;
-            for (String w : ws) {
-                String p = lookup(w);
-                if (!p.isEmpty()) {
-                    db.phonetic(w, p);
-                    any = true;
+            try {
+                Db db = new Db(app);
+                ArrayList<String> ws = db.missingPhonetic();
+                boolean any = false;
+                for (String w : ws) {
+                    String p = lookup(app, w);
+                    if (!p.isEmpty()) {
+                        db.phonetic(w, p);
+                        any = true;
+                    }
                 }
+                if (any && done != null) done.run();
+            } finally {
+                running = false;
             }
-            if (any && done != null) done.run();
-          } finally {
-            running = false;
-          }
         }).start();
     }
 }
