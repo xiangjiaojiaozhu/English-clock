@@ -45,7 +45,7 @@ public class LockService extends Service {
         Notification n = new Notification.Builder(this, "lock_service")
                 .setSmallIcon(R.drawable.ic_notify)
                 .setContentTitle("锁屏单词已开启")
-                .setContentText("亮屏时会先显示一组生词")
+                .setContentText("亮屏时会先显示生词卡片")
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .build();

@@ -78,6 +78,15 @@ public class MainActivity extends Activity {
         share(getIntent());
         Schedules.scheduleLock(this);
         if (Schedules.prefs(this).getBoolean("card_on", false)) LockService.start(this);
+        backfill();
+    }
+
+    /** fills phonetics for words saved before (offline dictionary, takes a moment the first time) */
+    void backfill() {
+        Phonetic.backfill(this, () -> runOnUiThread(() -> {
+            WordWidget.refresh(this);
+            if (tab == 1) words();
+        }));
     }
 
     @Override
@@ -349,8 +358,8 @@ public class MainActivity extends Activity {
             sp.setSpan(new ClickableSpan() {
                 @Override
                 public void onClick(View v) {
-                    boolean added = db.toggle(w, sentence(a[2], w), a[1]);
-                    if (added) translate(w);
+                    boolean added = db.toggle(w, sentence(a[2], w), a[1], "");
+                    if (added) lookupNew(w);
                     paint(sp, a[2]);
                     tv.setText(sp);
                     WordWidget.refresh(MainActivity.this);
@@ -405,8 +414,11 @@ public class MainActivity extends Activity {
         return r.length() > 240 ? r.substring(0, 240) + "…" : r;
     }
 
-    void translate(String word) {
+    /** phonetic (offline dictionary first) + Chinese meaning for a newly added word */
+    void lookupNew(String word) {
         new Thread(() -> {
+            String ph = Phonetic.lookup(this, word);
+            if (!ph.isEmpty()) db.phonetic(word, ph);
             try {
                 URL u = new URL("https://api.mymemory.translated.net/get?langpair=en%7Czh-CN&q=" + URLEncoder.encode(word, "UTF-8"));
                 HttpURLConnection c = (HttpURLConnection) u.openConnection();
@@ -414,12 +426,13 @@ public class MainActivity extends Activity {
                 c.setReadTimeout(8000);
                 String raw = ImportUtil.stream(c.getInputStream());
                 String zh = new JSONObject(raw).getJSONObject("responseData").optString("translatedText", "").trim();
-                if (!zh.isEmpty() && !zh.equalsIgnoreCase(word)) {
-                    db.zhIfEmpty(word, zh);
-                    runOnUiThread(() -> WordWidget.refresh(this));
-                }
+                if (!zh.isEmpty() && !zh.equalsIgnoreCase(word)) db.zhIfEmpty(word, zh);
             } catch (Exception ignored) {
             }
+            runOnUiThread(() -> {
+                WordWidget.refresh(this);
+                if (tab == 1) words();
+            });
         }).start();
     }
 
@@ -444,9 +457,13 @@ public class MainActivity extends Activity {
                 boolean done = "1".equals(v[6]);
                 LinearLayout c = card();
                 LinearLayout top = row();
+                top.setGravity(Gravity.BOTTOM);
                 TextView wv = text(v[1], 20, done ? MUTED : NAVY);
                 wv.setTypeface(null, Typeface.BOLD);
-                top.addView(wv, new LinearLayout.LayoutParams(0, -2, 1));
+                top.addView(wv);
+                TextView ph = text(v[7].isEmpty() ? "" : "  " + v[7], 15, MUTED);
+                ph.setPadding(0, 0, 0, dp(2));
+                top.addView(ph, new LinearLayout.LayoutParams(0, -2, 1));
                 if (done) top.addView(text("已掌握", 12, BLUE));
                 c.addView(top);
                 boolean noZh = v[2].isEmpty();
@@ -479,7 +496,7 @@ public class MainActivity extends Activity {
         t.setTypeface(null, Typeface.BOLD);
         c.addView(t);
         c.addView(text(on ? "已开启 · 亮屏先看到生词卡片，左右滑动换词，上滑关闭"
-                : "开启后，每次亮屏会先出现一组生词卡片，上滑关闭后再正常解锁", 14, MUTED));
+                : "开启后，每次亮屏会先出现生词卡片，上滑关闭后再正常解锁", 14, MUTED));
         if (!overlay) {
             TextView warn = text("还差一步：需要允许「显示在其他应用的上层」", 14, Color.rgb(196, 60, 60));
             warn.setPadding(0, dp(6), 0, 0);
@@ -540,17 +557,27 @@ public class MainActivity extends Activity {
     }
 
     void edit(String[] v) {
+        EditText ph = input("音标，例如 /rɪˈzɪliəns/");
+        ph.setText(v[7]);
+        ph.setSingleLine(true);
         EditText z = input("中文释义");
         z.setText(v[2]);
         LinearLayout p = new LinearLayout(this);
+        p.setOrientation(LinearLayout.VERTICAL);
         p.setPadding(dp(20), 0, dp(20), 0);
+        p.addView(ph, new LinearLayout.LayoutParams(-1, -2));
         p.addView(z, new LinearLayout.LayoutParams(-1, -2));
         boolean done = "1".equals(v[6]);
         new AlertDialog.Builder(this)
                 .setTitle(v[1])
                 .setMessage(v[3].isEmpty() ? "来源：" + v[4] : v[3] + "\n\n来源：" + v[4])
                 .setView(p)
-                .setPositiveButton("保存", (d, w) -> { db.zh(v[0], z.getText().toString().trim()); WordWidget.refresh(this); words(); })
+                .setPositiveButton("保存", (d, w) -> {
+                    db.zh(v[0], z.getText().toString().trim());
+                    db.phonetic(v[1], ph.getText().toString().trim());
+                    WordWidget.refresh(this);
+                    words();
+                })
                 .setNeutralButton(done ? "设为未掌握" : "已掌握", (d, w) -> { db.master(v[0], !done); words(); })
                 .setNegativeButton("删除", (d, w) -> { db.delW(v[0]); WordWidget.refresh(this); words(); })
                 .show();

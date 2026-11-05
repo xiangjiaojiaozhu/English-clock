@@ -13,18 +13,33 @@ import java.util.Locale;
 
 public class Db extends SQLiteOpenHelper {
     public Db(Context c) {
-        super(c, "english_clock.db", null, 1);
+        super(c, "english_clock.db", null, 2);
     }
 
     @Override
     public void onCreate(SQLiteDatabase d) {
         d.execSQL("create table if not exists article(id integer primary key autoincrement,title text,body text,added text)");
-        d.execSQL("create table if not exists vocab(id integer primary key autoincrement,word text unique,zh text default '',context text,source text,added text,mastered integer default 0)");
+        d.execSQL("create table if not exists vocab(id integer primary key autoincrement,word text unique,zh text default '',context text,source text,added text,mastered integer default 0,phonetic text default '')");
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase d, int oldV, int newV) {
         onCreate(d);
+        ensurePhoneticColumn(d);
+    }
+
+    @Override
+    public void onOpen(SQLiteDatabase d) {
+        super.onOpen(d);
+        if (!d.isReadOnly()) ensurePhoneticColumn(d);
+    }
+
+    static void ensurePhoneticColumn(SQLiteDatabase d) {
+        Cursor c = d.rawQuery("pragma table_info(vocab)", null);
+        boolean has = false;
+        while (c.moveToNext()) if ("phonetic".equals(c.getString(1))) has = true;
+        c.close();
+        if (!has) d.execSQL("alter table vocab add column phonetic text default ''");
     }
 
     static String s(Cursor c, int i) {
@@ -60,7 +75,7 @@ public class Db extends SQLiteOpenHelper {
     }
 
     /** returns true if the word was added, false if removed */
-    public boolean toggle(String w, String context, String source) {
+    public boolean toggle(String w, String context, String source, String phonetic) {
         if (has(w)) {
             getWritableDatabase().delete("vocab", "lower(word)=lower(?)", new String[]{w});
             return false;
@@ -70,18 +85,29 @@ public class Db extends SQLiteOpenHelper {
         v.put("context", context);
         v.put("source", source);
         v.put("added", day());
+        v.put("phonetic", phonetic == null ? "" : phonetic);
         getWritableDatabase().insert("vocab", null, v);
         return true;
     }
 
-    /** id, word, zh, context, source, added, mastered */
+    /** id, word, zh, context, source, added, mastered, phonetic */
     public ArrayList<String[]> words(String q) {
         ArrayList<String[]> out = new ArrayList<>();
         String like = "%" + q + "%";
         Cursor c = getReadableDatabase().rawQuery(
-                "select id,word,zh,context,source,added,mastered from vocab where word like ? or zh like ? order by mastered,id desc",
+                "select id,word,zh,context,source,added,mastered,phonetic from vocab where word like ? or zh like ? order by mastered,id desc",
                 new String[]{like, like});
-        while (c.moveToNext()) out.add(new String[]{s(c, 0), s(c, 1), s(c, 2), s(c, 3), s(c, 4), s(c, 5), s(c, 6)});
+        while (c.moveToNext()) {
+            out.add(new String[]{s(c, 0), s(c, 1), s(c, 2), s(c, 3), s(c, 4), s(c, 5), s(c, 6), s(c, 7)});
+        }
+        c.close();
+        return out;
+    }
+
+    public ArrayList<String> missingPhonetic() {
+        ArrayList<String> out = new ArrayList<>();
+        Cursor c = getReadableDatabase().rawQuery("select word from vocab where phonetic is null or phonetic=''", null);
+        while (c.moveToNext()) out.add(s(c, 0));
         c.close();
         return out;
     }
@@ -104,6 +130,12 @@ public class Db extends SQLiteOpenHelper {
         ContentValues v = new ContentValues();
         v.put("zh", z);
         getWritableDatabase().update("vocab", v, "lower(word)=lower(?) and (zh is null or zh='')", new String[]{word});
+    }
+
+    public void phonetic(String word, String p) {
+        ContentValues v = new ContentValues();
+        v.put("phonetic", p);
+        getWritableDatabase().update("vocab", v, "lower(word)=lower(?)", new String[]{word});
     }
 
     public void master(String id, boolean m) {

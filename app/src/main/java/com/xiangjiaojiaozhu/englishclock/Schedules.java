@@ -36,10 +36,10 @@ public class Schedules {
         am.setInexactRepeating(AlarmManager.RTC_WAKEUP, x.getTimeInMillis(), AlarmManager.INTERVAL_DAY, dailyPi(c));
     }
 
+    /** the v0.5 wallpaper rotation is retired: just cancel any leftover alarm */
     public static void scheduleLock(Context c) {
-        SharedPreferences p = prefs(c);
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
-        am.cancel(lockPi(c));   // v0.5 wallpaper rotation retired
-        p.edit().putBoolean("lock_on", false).apply();
+        am.cancel(lockPi(c));
+        prefs(c).edit().putBoolean("lock_on", false).apply();
     }
 }

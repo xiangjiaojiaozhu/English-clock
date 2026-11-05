@@ -22,7 +22,7 @@ public class WordWidget extends AppWidgetProvider {
         String z = "点一个生词，它会出现在这里";
         if (!a.isEmpty()) {
             String[] v = a.get(new Random().nextInt(a.size()));
-            w = v[1];
+            w = v[7].isEmpty() ? v[1] : v[1] + "  " + v[7];
             z = v[2].length() > 0 ? v[2] : v[3];
         }
         RemoteViews r = new RemoteViews(c.getPackageName(), R.layout.word_widget);
