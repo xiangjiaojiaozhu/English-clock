@@ -12,6 +12,15 @@ import java.util.HashSet;
 import java.util.Locale;
 
 public class Db extends SQLiteOpenHelper {
+    /** increases on every change; used to know when to sync */
+    public static volatile long version = 0;
+    public static volatile long changedAt = 0;
+
+    static void bump() {
+        version++;
+        changedAt = System.currentTimeMillis();
+    }
+
     public Db(Context c) {
         super(c, "english_clock.db", null, 2);
     }
@@ -52,7 +61,9 @@ public class Db extends SQLiteOpenHelper {
         v.put("title", title);
         v.put("body", body);
         v.put("added", day());
-        return getWritableDatabase().insert("article", null, v);
+        long id = getWritableDatabase().insert("article", null, v);
+        bump();
+        return id;
     }
 
     public ArrayList<String[]> arts() {
@@ -65,6 +76,7 @@ public class Db extends SQLiteOpenHelper {
 
     public void delA(String id) {
         getWritableDatabase().delete("article", "id=?", new String[]{id});
+        bump();
     }
 
     public boolean has(String w) {
@@ -78,6 +90,7 @@ public class Db extends SQLiteOpenHelper {
     public boolean toggle(String w, String context, String source, String phonetic) {
         if (has(w)) {
             getWritableDatabase().delete("vocab", "lower(word)=lower(?)", new String[]{w});
+            bump();
             return false;
         }
         ContentValues v = new ContentValues();
@@ -87,7 +100,27 @@ public class Db extends SQLiteOpenHelper {
         v.put("added", day());
         v.put("phonetic", phonetic == null ? "" : phonetic);
         getWritableDatabase().insert("vocab", null, v);
+        bump();
         return true;
+    }
+
+    /** copy a word from a friend's book; false if I already have it */
+    public boolean addFriendWord(String word, String zh, String phonetic, String context, String source) {
+        String key = word.toLowerCase(Locale.ROOT);
+        if (has(key)) return false;
+        ContentValues v = new ContentValues();
+        v.put("word", key);
+        v.put("zh", zh == null ? "" : zh);
+        v.put("phonetic", phonetic == null ? "" : phonetic);
+        v.put("context", context == null ? "" : context);
+        v.put("source", source == null ? "" : source);
+        v.put("added", day());
+        long id = getWritableDatabase().insertWithOnConflict("vocab", null, v, SQLiteDatabase.CONFLICT_IGNORE);
+        if (id > 0) {
+            bump();
+            return true;
+        }
+        return false;
     }
 
     /** id, word, zh, context, source, added, mastered, phonetic */
@@ -124,28 +157,33 @@ public class Db extends SQLiteOpenHelper {
         ContentValues v = new ContentValues();
         v.put("zh", z);
         getWritableDatabase().update("vocab", v, "id=?", new String[]{id});
+        bump();
     }
 
     public void zhIfEmpty(String word, String z) {
         ContentValues v = new ContentValues();
         v.put("zh", z);
-        getWritableDatabase().update("vocab", v, "lower(word)=lower(?) and (zh is null or zh='')", new String[]{word});
+        int n = getWritableDatabase().update("vocab", v, "lower(word)=lower(?) and (zh is null or zh='')", new String[]{word});
+        if (n > 0) bump();
     }
 
     public void phonetic(String word, String p) {
         ContentValues v = new ContentValues();
         v.put("phonetic", p);
         getWritableDatabase().update("vocab", v, "lower(word)=lower(?)", new String[]{word});
+        bump();
     }
 
     public void master(String id, boolean m) {
         ContentValues v = new ContentValues();
         v.put("mastered", m ? 1 : 0);
         getWritableDatabase().update("vocab", v, "id=?", new String[]{id});
+        bump();
     }
 
     public void delW(String id) {
         getWritableDatabase().delete("vocab", "id=?", new String[]{id});
+        bump();
     }
 
     public static String day() {

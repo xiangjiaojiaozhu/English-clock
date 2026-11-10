@@ -4,9 +4,9 @@ android {
   namespace 'com.xiangjiaojiaozhu.englishclock'
   compileSdk 36
   signingConfigs { release { storeFile file('english-clock-release.jks'); storePassword 'EnglishClock2026'; keyAlias 'englishclock'; keyPassword 'EnglishClock2026' } }
-  defaultConfig { applicationId 'com.xiangjiaojiaozhu.englishclock'; minSdk 26; targetSdk 35; versionCode 11; versionName '0.7.1' }
+  defaultConfig { applicationId 'com.xiangjiaojiaozhu.englishclock'; minSdk 26; targetSdk 35; versionCode 12; versionName '0.8.0' }
   buildTypes { debug { signingConfig signingConfigs.release }; release { signingConfig signingConfigs.release; minifyEnabled false } }
-  packaging { resources { excludes += ['/META-INF/DEPENDENCIES','/META-INF/LICENSE','/META-INF/NOTICE'] } }
+  packaging { resources { excludes += ['/META-INF/DEPENDENCIES','/META-INF/LICENSE','/META-INF/NOTICE','/META-INF/*.kotlin_module'] } }
   lint { checkReleaseBuilds false; abortOnError false }
 }
 
@@ -14,4 +14,5 @@ dependencies {
   implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
   implementation 'com.google.mlkit:text-recognition:16.0.1'
   implementation 'com.google.android.gms:play-services-tasks:18.2.1'
+  implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }
