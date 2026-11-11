@@ -4,7 +4,7 @@ android {
   namespace 'com.xiangjiaojiaozhu.englishclock'
   compileSdk 36
   signingConfigs { release { storeFile file('english-clock-release.jks'); storePassword 'EnglishClock2026'; keyAlias 'englishclock'; keyPassword 'EnglishClock2026' } }
-  defaultConfig { applicationId 'com.xiangjiaojiaozhu.englishclock'; minSdk 26; targetSdk 35; versionCode 13; versionName '0.8.1' }
+  defaultConfig { applicationId 'com.xiangjiaojiaozhu.englishclock'; minSdk 26; targetSdk 35; versionCode 14; versionName '0.9.0' }
   buildTypes { debug { signingConfig signingConfigs.release }; release { signingConfig signingConfigs.release; minifyEnabled false } }
   packaging { resources { excludes += ['/META-INF/DEPENDENCIES','/META-INF/LICENSE','/META-INF/NOTICE','/META-INF/*.kotlin_module'] } }
   lint { checkReleaseBuilds false; abortOnError false }

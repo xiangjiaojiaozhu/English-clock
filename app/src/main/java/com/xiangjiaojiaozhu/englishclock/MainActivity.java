@@ -47,15 +47,12 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
 
 public class MainActivity extends Activity {
@@ -89,16 +86,20 @@ public class MainActivity extends Activity {
     boolean run = false;
     final Runnable tickR = this::tick;
 
-    // sharing
-    boolean syncing, ownChecked;
-    String lastSyncMsg = "", lastUploaded = "";
+    // account sync
+    boolean syncing, choosingFolder;
+    String lastSyncMsg = "", lastOwn = "", lastFriend = "";
     long syncedVersion = -1, nextPull = 0;
-    LinkedHashMap<String, JSONObject> friends = new LinkedHashMap<>();
-    Map<String, String> stamps = new HashMap<>();
+    int deviceCount = 0;
+    Map<String, ShareSync.Doc> devices = new HashMap<>();
+    Map<String, String> devStamps = new HashMap<>();
+    LinkedHashMap<String, ShareSync.Doc> friends = new LinkedHashMap<>();
+    Map<String, String> friendStamps = new HashMap<>();
     TextView syncStatus;
     LinearLayout friendList;
     View friendArtHeader;
     String curFriendKey = null, friendQuery = "";
+    String[] openArticle = null;
     final Runnable syncTickR = this::syncTick;
 
     @Override
@@ -109,6 +110,7 @@ public class MainActivity extends Activity {
                 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 3);
         }
+        ShareSync.migrate(this);
         friends = ShareSync.loadCache(this);
         shell();
         go(0);
@@ -138,7 +140,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         h.removeCallbacks(syncTickR);
-        if (ShareSync.ready(this) && !syncing && Db.version != syncedVersion) startSync(false);
+        if (ShareSync.loggedIn(this) && !syncing && Db.version != syncedVersion) startSync(false);
     }
 
     @Override
@@ -200,6 +202,10 @@ public class MainActivity extends Activity {
         return p;
     }
 
+    LinearLayout.LayoutParams full() {
+        return new LinearLayout.LayoutParams(-1, -2);
+    }
+
     LinearLayout card() {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
@@ -252,7 +258,7 @@ public class MainActivity extends Activity {
         LinearLayout nav = row();
         nav.setBackgroundResource(R.drawable.nav_bg);
         nav.setPadding(dp(4), dp(2), dp(4), dp(2));
-        String[] names = {"阅读", "生词", "专注", "提醒", "共享"};
+        String[] names = {"阅读", "生词", "专注", "提醒", "账号"};
         for (int i = 0; i < names.length; i++) {
             final int k = i;
             Button b = new Button(this);
@@ -262,7 +268,7 @@ public class MainActivity extends Activity {
             b.setBackgroundColor(Color.TRANSPARENT);
             b.setStateListAnimator(null);
             b.setPadding(0, 0, 0, 0);
-            b.setOnClickListener(v -> go(k));
+            b.setOnClickListener(v -> { choosingFolder = false; go(k); });
             tabs[i] = b;
             nav.addView(b, new LinearLayout.LayoutParams(0, dp(54), 1));
         }
@@ -271,13 +277,11 @@ public class MainActivity extends Activity {
     }
 
     // ---------------------------------------------------------------- fast scroll
-    // A handle on the right edge: drag it with one finger to jump through long pages.
     void setupFastScroll(FrameLayout wrap) {
         GradientDrawable bar = new GradientDrawable();
         bar.setColor(0xFF7F8BA0);
         bar.setCornerRadius(dp(4));
         thumb = new View(this);
-        // 30dp wide touch area, only the right 7dp is drawn
         thumb.setBackground(new InsetDrawable(bar, dp(21), dp(2), dp(2), dp(2)));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(30), dp(64), Gravity.END | Gravity.TOP);
         wrap.addView(thumb, lp);
@@ -329,7 +333,6 @@ public class MainActivity extends Activity {
         thumb.setTranslationY(Math.max(0, Math.min(track, y)));
     }
 
-    /** smooth-scroll so that v (anywhere inside body) is at the top of the screen */
     void scrollToView(View v) {
         int y = 0;
         View c = v;
@@ -350,11 +353,12 @@ public class MainActivity extends Activity {
         syncStatus = null;
         friendList = null;
         friendArtHeader = null;
+        openArticle = null;
         if (k == 0) home();
         if (k == 1) words();
         if (k == 2) focus();
         if (k == 3) alarm();
-        if (k == 4) showShare();
+        if (k == 4) showAccount();
     }
 
     void head(String title, String sub) {
@@ -475,6 +479,7 @@ public class MainActivity extends Activity {
 
     void read(String[] a) {
         head(a[1], "轻触单词加入生词本，再点一次取消。黄色表示已收藏。");
+        openArticle = a;
         LinearLayout c = card();
         c.setPadding(dp(20), dp(18), dp(20), dp(22));
         TextView tv = text("", 19, NAVY);
@@ -510,7 +515,7 @@ public class MainActivity extends Activity {
         body.addView(c);
 
         Button del = soft("删除这篇文章", v -> new AlertDialog.Builder(this)
-                .setMessage("删除这篇文章？生词会保留。")
+                .setMessage("删除这篇文章？生词会保留。已登录账号时，其他设备上也会删除。")
                 .setPositiveButton("删除", (d, w) -> { db.delA(a[0]); go(0); })
                 .setNegativeButton("取消", null)
                 .show());
@@ -702,8 +707,9 @@ public class MainActivity extends Activity {
                 .setMessage(v[3].isEmpty() ? "来源：" + v[4] : v[3] + "\n\n来源：" + v[4])
                 .setView(p)
                 .setPositiveButton("保存", (d, w) -> {
-                    db.zh(v[0], z.getText().toString().trim());
-                    db.phonetic(v[1], ph.getText().toString().trim());
+                    String nz = z.getText().toString().trim(), np = ph.getText().toString().trim();
+                    if (!nz.equals(v[2])) db.zh(v[0], nz);
+                    if (!np.equals(v[7])) db.phonetic(v[1], np);
                     WordWidget.refresh(this);
                     words();
                 })
@@ -824,47 +830,38 @@ public class MainActivity extends Activity {
         body.addView(hint("华为手机建议：设置 → 应用和服务 → 应用启动管理 → English Clock 改为手动管理，并打开允许后台活动，否则提醒可能延迟。"));
     }
 
-    // ================================================================ share tab (Jianguoyun)
-    void showShare() {
+    // ================================================================ account tab
+    void showAccount() {
         syncStatus = null;
         friendList = null;
         friendArtHeader = null;
-        if (!ShareSync.loggedIn(this)) shareLogin();
-        else if (ShareSync.folder(this).isEmpty()) shareFolders();
-        else shareFriends();
+        if (!ShareSync.loggedIn(this)) accountLogin();
+        else if (choosingFolder) chooseFriendFolder();
+        else accountMain();
     }
 
-    LinearLayout.LayoutParams full() {
-        return new LinearLayout.LayoutParams(-1, -2);
-    }
-
-    void shareLogin() {
-        head("共享", "登录坚果云，和朋友互相看生词本。");
+    void accountLogin() {
+        head("账号", "登录后，手机和电脑的生词本自动保持一致。");
         LinearLayout c = card();
-        c.addView(text("两种用法都可以，数据各存各的，能看到对方的生词和文章：\n"
-                + "· 各用自己的坚果云账号：要在坚果云网页上把共享文件夹邀请给对方，权限选「可编辑」。\n"
-                + "· 共用一个坚果云账号：不用邀请，两人填不同的昵称、选同一个文件夹即可。", 13, MUTED));
+        c.addView(text("用坚果云账号登录。电脑、手机登录同一个账号后，生词、文章、中文释义、音标、掌握状态都会自动同步，删除也会同步。\n"
+                + "坚果云要求第三方 App 使用「应用密码」，不是平时的登录密码。", 13, MUTED));
         EditText u = input("坚果云账号（邮箱 / 手机号）");
         u.setSingleLine(true);
         u.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         u.setText(ShareSync.user(this));
-        EditText p = input("应用密码（不是登录密码）");
+        EditText p = input("应用密码");
         p.setSingleLine(true);
         p.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        EditText n = input("我的昵称（朋友看到的名字）");
-        n.setSingleLine(true);
-        n.setText(ShareSync.nick(this));
         c.addView(u, full());
         c.addView(p, full());
-        c.addView(n, full());
         LinearLayout r = row();
         Button login = primary("登录", null);
-        login.setOnClickListener(v -> doLogin(u.getText().toString().trim(), p.getText().toString().trim(), n.getText().toString().trim(), login));
+        login.setOnClickListener(v -> doLogin(u.getText().toString().trim(), p.getText().toString().trim(), login));
         r.addView(login, weight(1));
         r.addView(soft("获取应用密码", v -> passHelp()), weight(1));
         c.addView(r, full());
         body.addView(c);
-        body.addView(hint("提示：手机和电脑算两台设备。用同一个坚果云账号时，手机要填一个和电脑不同的昵称，例如「小明-手机」。"));
+        body.addView(hint("还没有坚果云账号？到 jianguoyun.com 免费注册一个。不登录也能正常使用，只是不同步。"));
     }
 
     void passHelp() {
@@ -873,13 +870,12 @@ public class MainActivity extends Activity {
                         + "2. 右上角头像 → 账户信息 → 安全选项\n"
                         + "3. 在「第三方应用管理」里点「添加应用」，名称填 EnglishClock\n"
                         + "4. 点「生成密码」，把生成的那串字符填到这里\n\n"
-                        + "两人共用一个账号时，可以都用同一个应用密码。\n"
+                        + "同一个账号的电脑和手机都填这同一个应用密码。\n"
                         + "不想用了，在坚果云里删掉这个应用密码即可，不影响账号本身。");
     }
 
-    void doLogin(String user, String pass, String nick, Button btn) {
+    void doLogin(String user, String pass, Button btn) {
         if (user.isEmpty() || pass.isEmpty()) { toast("请填写坚果云账号和应用密码"); return; }
-        if (nick.isEmpty()) { toast("请填写昵称"); return; }
         btn.setEnabled(false);
         btn.setText("正在连接…");
         new Thread(() -> {
@@ -900,150 +896,95 @@ public class MainActivity extends Activity {
                 }
                 SharedPreferences.Editor e = Schedules.prefs(this).edit();
                 if (!user.equalsIgnoreCase(ShareSync.user(this))) {
-                    e.putString("sync_folder", "").putString("sync_folder_name", "");
+                    e.putString("friend_folder", "").putString("friend_folder_name", "");
                     clearFriends();
                 }
-                e.putString("sync_user", user).putString("sync_pass", enc).putString("sync_nick", nick).apply();
-                lastUploaded = "";
+                e.putString("sync_user", user).putString("sync_pass", enc).apply();
+                devices.clear();
+                devStamps.clear();
+                lastOwn = "";
+                lastFriend = "";
                 lastSyncMsg = "";
-                ownChecked = false;
-                showShare();
-                if (ShareSync.ready(this)) startSync(true);
+                go(4);
+                startSync(true);
             });
         }).start();
     }
 
-    void shareFolders() {
-        head("选择共享文件夹", "已登录：" + ShareSync.user(this) + " · 昵称：" + ShareSync.nick(this));
-        body.addView(hint("【共用一个账号】第一个人点「新建共享文件夹」；第二个人点「刷新」，选中同一个文件夹即可，不用邀请。\n"
-                + "【各用自己的账号】新建后到坚果云网页把它共享给对方（权限选「可编辑」）；对方接受邀请后点「刷新」，选同一个文件夹。"));
-        LinearLayout r = row();
-        r.addView(primary("新建共享文件夹", v -> newFolder()), weight(1));
-        r.addView(soft("刷新", v -> showShare()), weight(1));
-        body.addView(r, full());
-        TextView st = hint("正在读取坚果云里的文件夹…");
-        body.addView(st);
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        body.addView(list, full());
-        LinearLayout r2 = row();
-        r2.addView(soft("退出登录", v -> logout()), weight(1));
-        body.addView(r2, full());
-
-        String user = ShareSync.user(this), pass = ShareSync.pass(this);
-        new Thread(() -> {
-            List<ShareSync.Item> dirs = new ArrayList<>();
-            String err = null;
-            try {
-                for (ShareSync.Item it : ShareSync.list(user, pass, ShareSync.ROOT)) if (it.dir) dirs.add(it);
-                Collections.sort(dirs, (a, b) -> a.name.compareToIgnoreCase(b.name));
-            } catch (Exception e) {
-                err = e.getMessage();
-            }
-            final String fe = err;
-            runOnUiThread(() -> {
-                if (tab != 4) return;
-                if (fe != null) {
-                    st.setText("读取失败：" + fe);
-                    st.setTextColor(RED);
-                    return;
-                }
-                st.setText(dirs.isEmpty() ? "坚果云里还没有文件夹，点「新建共享文件夹」。" : "共 " + dirs.size() + " 个文件夹，点一个即可使用：");
-                for (ShareSync.Item it : dirs) {
-                    LinearLayout c = card();
-                    TextView t = text(it.name, 17, NAVY);
-                    t.setTypeface(null, Typeface.BOLD);
-                    c.addView(t);
-                    c.setOnClickListener(v -> useFolder(it.href, it.name));
-                    list.addView(c);
-                }
-            });
-        }).start();
-    }
-
-    void newFolder() {
-        EditText e = input("文件夹名称");
-        e.setText("EnglishClock共享");
-        e.setSingleLine(true);
-        LinearLayout p = new LinearLayout(this);
-        p.setPadding(dp(20), 0, dp(20), 0);
-        p.addView(e, new LinearLayout.LayoutParams(-1, -2));
-        new AlertDialog.Builder(this).setTitle("新建共享文件夹").setView(p)
-                .setPositiveButton("新建", (d, w) -> {
-                    String name = e.getText().toString().trim();
-                    if (name.isEmpty()) return;
-                    String user = ShareSync.user(this), pass = ShareSync.pass(this);
-                    new Thread(() -> {
-                        String href = null, err = null;
-                        try { href = ShareSync.makeDir(user, pass, ShareSync.ROOT, name); } catch (Exception ex) { err = ex.getMessage(); }
-                        final String fh = href, fe = err;
-                        runOnUiThread(() -> {
-                            if (fe != null) { alert("新建失败", fe); return; }
-                            alert("新建成功", "已新建「" + name + "」。\n\n"
-                                    + "· 对方和你共用这个坚果云账号：让他登录同一个账号、填一个不同的昵称，选这个文件夹即可。\n"
-                                    + "· 对方用他自己的账号：用浏览器打开坚果云网页 → 找到这个文件夹 → 共享 / 邀请成员 → 输入对方的账号，权限选「可编辑」。");
-                            useFolder(fh, name);
-                        });
-                    }).start();
+    void logout() {
+        new AlertDialog.Builder(this)
+                .setMessage("退出登录后不再同步，手机上的文章和生词都会保留。确定退出？")
+                .setPositiveButton("退出", (d, w) -> {
+                    Schedules.prefs(this).edit().putString("sync_pass", "").apply();
+                    devices.clear();
+                    devStamps.clear();
+                    deviceCount = 0;
+                    lastOwn = "";
+                    lastSyncMsg = "";
+                    clearFriends();
+                    go(4);
                 })
                 .setNegativeButton("取消", null).show();
     }
 
-    void useFolder(String href, String name) {
-        Schedules.prefs(this).edit().putString("sync_folder", ShareSync.dir(href)).putString("sync_folder_name", name).apply();
-        clearFriends();
-        lastUploaded = "";
-        lastSyncMsg = "";
-        ownChecked = false;
-        go(4);
-        startSync(true);
-    }
-
     void clearFriends() {
         friends.clear();
-        stamps.clear();
+        friendStamps.clear();
+        lastFriend = "";
         curFriendKey = null;
         ShareSync.saveCache(this, friends);
     }
 
-    void shareFriends() {
-        head("共享", "昵称：" + ShareSync.nick(this) + " · 文件夹：" + ShareSync.folderName(this));
+    void accountMain() {
+        head("账号", "已登录：" + ShareSync.user(this));
         syncStatus = text("", 14, BLUE);
         syncStatus.setTypeface(null, Typeface.BOLD);
         syncStatus.setPadding(dp(4), 0, dp(4), dp(6));
         body.addView(syncStatus);
         updateStatus();
-
+        body.addView(hint("电脑和手机登录这个账号后，生词、文章、掌握状态都会自动同步；在任何一台设备上删除，其他设备也会删除。"));
         LinearLayout r1 = row();
         r1.addView(primary("立即同步", v -> startSync(true)), weight(1));
-        r1.addView(soft("改昵称", v -> changeNick()), weight(1));
+        r1.addView(soft("退出登录", v -> logout()), weight(1));
         body.addView(r1, full());
-        LinearLayout r2 = row();
-        r2.addView(soft("更换文件夹", v -> {
-            Schedules.prefs(this).edit().putString("sync_folder", "").putString("sync_folder_name", "").apply();
+
+        TextView ft = text("和好友互相看生词本（可选）", 18, NAVY);
+        ft.setTypeface(null, Typeface.BOLD);
+        ft.setPadding(dp(4), dp(18), dp(4), dp(4));
+        body.addView(ft);
+
+        if (ShareSync.friendFolder(this).isEmpty()) {
+            body.addView(hint("好友用他自己的坚果云账号登录。你们共用一个坚果云文件夹（在坚果云网页上邀请对方，权限选「可编辑」），"
+                    + "就能互相看到对方的生词本，把有用的词加到自己的生词本里。各自的数据不会混在一起。"));
+            LinearLayout r2 = row();
+            r2.addView(soft("设置好友共享文件夹", v -> { choosingFolder = true; go(4); }), weight(1));
+            body.addView(r2, full());
+            return;
+        }
+
+        body.addView(hint("我的名字：" + ShareSync.nick(this) + " · 文件夹：" + ShareSync.friendFolderName(this)));
+        LinearLayout r3 = row();
+        r3.addView(soft("改名字", v -> changeNick()), weight(1));
+        r3.addView(soft("更换文件夹", v -> { choosingFolder = true; go(4); }), weight(1));
+        r3.addView(soft("关闭", v -> {
+            Schedules.prefs(this).edit().putString("friend_folder", "").putString("friend_folder_name", "").apply();
             clearFriends();
-            lastUploaded = "";
-            ownChecked = false;
             go(4);
         }), weight(1));
-        r2.addView(soft("退出登录", v -> logout()), weight(1));
-        body.addView(r2, full());
+        body.addView(r3, full());
 
         if (friends.isEmpty()) {
-            body.addView(hint("还没有收到好友的数据。对方登录（自己的账号或同一个账号）、选择同一个文件夹并同步一次后，这里就会出现他的生词本。"));
+            body.addView(hint("还没有收到好友的数据。好友登录他自己的账号、设置同一个文件夹并同步一次后，这里就会出现他的生词本。"));
             return;
         }
 
         final ArrayList<String> keys = new ArrayList<>(friends.keySet());
-        Collections.sort(keys, (a, b) -> friends.get(a).optString("Owner", "").compareTo(friends.get(b).optString("Owner", "")));
+        Collections.sort(keys, (a, b) -> friends.get(a).owner.compareTo(friends.get(b).owner));
         ArrayList<String> labels = new ArrayList<>();
         int sel = 0;
         for (int i = 0; i < keys.size(); i++) {
-            JSONObject f = friends.get(keys.get(i));
-            String owner = f.optString("Owner", "");
-            JSONObject v = f.optJSONObject("Vocab");
-            JSONArray a = f.optJSONArray("Articles");
-            labels.add((owner.isEmpty() ? "（未命名）" : owner) + " · " + (v == null ? 0 : v.length()) + " 词 · " + (a == null ? 0 : a.length()) + " 篇");
+            ShareSync.Doc f = friends.get(keys.get(i));
+            labels.add((f.owner.isEmpty() ? "（未命名）" : f.owner) + " · " + f.vocab.size() + " 词 · " + f.arts.size() + " 篇");
             if (keys.get(i).equals(curFriendKey)) sel = i;
         }
         curFriendKey = keys.get(sel);
@@ -1077,13 +1018,13 @@ public class MainActivity extends Activity {
             public void afterTextChanged(Editable e) { }
         });
         body.addView(q, full());
-        LinearLayout r3 = row();
-        r3.addView(primary("全部加入生词本", v -> addAllFriend()), weight(1));
-        r3.addView(soft("跳到好友文章 ↓", v -> {
+        LinearLayout r4 = row();
+        r4.addView(primary("全部加入生词本", v -> addAllFriend()), weight(1));
+        r4.addView(soft("跳到好友文章 ↓", v -> {
             if (friendArtHeader != null) scrollToView(friendArtHeader);
             else toast("这位好友还没有文章");
         }), weight(1));
-        body.addView(r3, full());
+        body.addView(r4, full());
 
         friendList = new LinearLayout(this);
         friendList.setOrientation(LinearLayout.VERTICAL);
@@ -1091,25 +1032,117 @@ public class MainActivity extends Activity {
         renderFriend();
     }
 
-    String owner(JSONObject f) {
-        String o = f.optString("Owner", "");
-        return o.isEmpty() ? "好友" : o;
+    void chooseFriendFolder() {
+        head("好友共享文件夹", "选一个你和好友共用的坚果云文件夹。");
+        body.addView(hint("第一个人：点「新建」，再到坚果云网页把它共享给好友，权限选「可编辑」。\n好友：在坚果云里接受邀请后点「刷新」，选同一个文件夹。"));
+        LinearLayout r = row();
+        r.addView(primary("新建", v -> newFolder()), weight(1));
+        r.addView(soft("刷新", v -> go(4)), weight(1));
+        r.addView(soft("返回", v -> { choosingFolder = false; go(4); }), weight(1));
+        body.addView(r, full());
+        TextView st = hint("正在读取坚果云里的文件夹…");
+        body.addView(st);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        body.addView(list, full());
+
+        String user = ShareSync.user(this), pass = ShareSync.pass(this);
+        new Thread(() -> {
+            List<ShareSync.Item> dirs = new ArrayList<>();
+            String err = null;
+            try {
+                List<ShareSync.Item> all = ShareSync.list(user, pass, ShareSync.ROOT);
+                if (all != null) for (ShareSync.Item it : all) if (it.dir && !ShareSync.sameDir(it.href, ShareSync.APP)) dirs.add(it);
+                Collections.sort(dirs, (a, b) -> a.name.compareToIgnoreCase(b.name));
+            } catch (Exception e) {
+                err = e.getMessage();
+            }
+            final String fe = err;
+            runOnUiThread(() -> {
+                if (tab != 4 || !choosingFolder) return;
+                if (fe != null) {
+                    st.setText("读取失败：" + fe);
+                    st.setTextColor(RED);
+                    return;
+                }
+                st.setText(dirs.isEmpty() ? "还没有文件夹，点「新建」。" : "点一个文件夹即可使用：");
+                for (ShareSync.Item it : dirs) {
+                    LinearLayout c = card();
+                    TextView t = text(it.name, 17, NAVY);
+                    t.setTypeface(null, Typeface.BOLD);
+                    c.addView(t);
+                    c.setOnClickListener(v -> useFolder(it.href, it.name));
+                    list.addView(c);
+                }
+            });
+        }).start();
     }
 
+    void newFolder() {
+        EditText e = input("文件夹名称");
+        e.setText("EnglishClock好友");
+        e.setSingleLine(true);
+        LinearLayout p = new LinearLayout(this);
+        p.setPadding(dp(20), 0, dp(20), 0);
+        p.addView(e, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this).setTitle("新建好友共享文件夹").setView(p)
+                .setPositiveButton("新建", (d, w) -> {
+                    String name = e.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    String user = ShareSync.user(this), pass = ShareSync.pass(this);
+                    new Thread(() -> {
+                        String href = null, err = null;
+                        try { href = ShareSync.makeDir(user, pass, ShareSync.ROOT, name); } catch (Exception ex) { err = ex.getMessage(); }
+                        final String fh = href, fe = err;
+                        runOnUiThread(() -> {
+                            if (fe != null) { alert("新建失败", fe); return; }
+                            alert("新建成功", "已新建「" + name + "」。\n\n下一步：用浏览器打开坚果云网页 → 找到这个文件夹 → 共享 / 邀请成员 → 输入好友的坚果云账号，权限选「可编辑」。");
+                            useFolder(fh, name);
+                        });
+                    }).start();
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    void useFolder(String href, String name) {
+        Schedules.prefs(this).edit().putString("friend_folder", ShareSync.dir(href)).putString("friend_folder_name", name).apply();
+        clearFriends();
+        choosingFolder = false;
+        go(4);
+        startSync(true);
+    }
+
+    void changeNick() {
+        String old = ShareSync.nick(this);
+        EditText e = input("好友看到的名字");
+        e.setText(old);
+        e.setSingleLine(true);
+        LinearLayout p = new LinearLayout(this);
+        p.setPadding(dp(20), 0, dp(20), 0);
+        p.addView(e, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this).setTitle("改名字").setView(p)
+                .setPositiveButton("保存", (d, w) -> {
+                    String n = e.getText().toString().trim();
+                    if (n.isEmpty() || n.equals(old)) return;
+                    Schedules.prefs(this).edit().putString("sync_nick", n).apply();
+                    go(4);
+                    startSync(false);
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    String owner(ShareSync.Doc f) {
+        return f.owner.isEmpty() ? "好友" : f.owner;
+    }
+
+    /** key, word, zh, phonetic, context, added */
     ArrayList<String[]> friendWords() {
         ArrayList<String[]> out = new ArrayList<>();
-        JSONObject f = curFriendKey == null ? null : friends.get(curFriendKey);
+        ShareSync.Doc f = curFriendKey == null ? null : friends.get(curFriendKey);
         if (f == null) return out;
-        JSONObject v = f.optJSONObject("Vocab");
-        if (v == null) return out;
-        Iterator<String> it = v.keys();
-        while (it.hasNext()) {
-            String k = it.next();
-            JSONObject w = v.optJSONObject(k);
-            if (w == null) continue;
-            String word = w.optString("Word", k);
-            out.add(new String[]{k, word.isEmpty() ? k : word, w.optString("Zh", ""), w.optString("Phonetic", ""),
-                    w.optString("Context", ""), w.optString("Added", "")});
+        for (Map.Entry<String, ShareSync.W> e : f.vocab.entrySet()) {
+            ShareSync.W w = e.getValue();
+            out.add(new String[]{e.getKey(), w.word.isEmpty() ? e.getKey() : w.word, w.zh, w.phonetic, w.context, w.added});
         }
         Collections.reverse(out);
         Collections.sort(out, (a, b) -> b[5].compareTo(a[5]));
@@ -1132,7 +1165,7 @@ public class MainActivity extends Activity {
         if (friendList == null) return;
         friendList.removeAllViews();
         friendArtHeader = null;
-        JSONObject f = curFriendKey == null ? null : friends.get(curFriendKey);
+        ShareSync.Doc f = curFriendKey == null ? null : friends.get(curFriendKey);
         if (f == null) return;
         String who = owner(f);
         ArrayList<String[]> ws = friendWords();
@@ -1158,7 +1191,7 @@ public class MainActivity extends Activity {
             else {
                 Button add = soft("加入", v -> addFriendWord(w, who));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(72), dp(40));
-                lp.setMargins(dp(8), 0, dp(20), 0);   // keep clear of the fast-scroll handle
+                lp.setMargins(dp(8), 0, dp(20), 0);
                 top.addView(add, lp);
             }
             c.addView(top);
@@ -1171,22 +1204,19 @@ public class MainActivity extends Activity {
             friendList.addView(c);
         }
 
-        JSONArray arts = f.optJSONArray("Articles");
-        if (arts != null && arts.length() > 0) {
-            TextView t = text(who + " 的文章（" + arts.length() + " 篇）", 18, NAVY);
+        if (!f.arts.isEmpty()) {
+            TextView t = text(who + " 的文章（" + f.arts.size() + " 篇）", 18, NAVY);
             t.setTypeface(null, Typeface.BOLD);
             t.setPadding(dp(4), dp(16), dp(4), dp(4));
             friendList.addView(t);
             friendArtHeader = t;
-            for (int i = 0; i < arts.length(); i++) {
-                JSONObject a = arts.optJSONObject(i);
-                if (a == null) continue;
-                String title = a.optString("Title", "文章"), content = a.optString("Content", "");
+            for (ShareSync.A a : f.arts) {
+                String title = a.title.isEmpty() ? "文章" : a.title, content = a.content;
                 LinearLayout c = card();
                 TextView tt = text(title, 16, NAVY);
                 tt.setTypeface(null, Typeface.BOLD);
                 c.addView(tt);
-                c.addView(text(a.optString("Date", ""), 12, MUTED));
+                c.addView(text(a.date, 12, MUTED));
                 LinearLayout r = row();
                 r.addView(soft("复制到我的文章", v -> {
                     db.addA(title + "（来自 " + who + "）", content);
@@ -1208,11 +1238,11 @@ public class MainActivity extends Activity {
             WordWidget.refresh(this);
         } else toast("你已经有这个词了");
         renderFriend();
-        scroll.post(() -> scroll.scrollTo(0, y));   // stay where you were
+        scroll.post(() -> scroll.scrollTo(0, y));
     }
 
     void addAllFriend() {
-        JSONObject f = curFriendKey == null ? null : friends.get(curFriendKey);
+        ShareSync.Doc f = curFriendKey == null ? null : friends.get(curFriendKey);
         if (f == null) return;
         ArrayList<String[]> ws = friendWords();
         String who = owner(f);
@@ -1228,50 +1258,13 @@ public class MainActivity extends Activity {
                 .setNegativeButton("取消", null).show();
     }
 
-    void changeNick() {
-        String old = ShareSync.nick(this);
-        EditText e = input("朋友看到的名字");
-        e.setText(old);
-        e.setSingleLine(true);
-        LinearLayout p = new LinearLayout(this);
-        p.setPadding(dp(20), 0, dp(20), 0);
-        p.addView(e, new LinearLayout.LayoutParams(-1, -2));
-        new AlertDialog.Builder(this).setTitle("改昵称").setView(p)
-                .setPositiveButton("保存", (d, w) -> {
-                    String n = e.getText().toString().trim();
-                    if (n.isEmpty() || n.equals(old)) return;
-                    String user = ShareSync.user(this), pass = ShareSync.pass(this);
-                    String oldHref = ShareSync.ready(this) ? ShareSync.folder(this) + ShareSync.fileFor(user, old) : null;
-                    Schedules.prefs(this).edit().putString("sync_nick", n).apply();
-                    lastUploaded = "";
-                    lastSyncMsg = "";
-                    ownChecked = false;
-                    if (oldHref != null && !pass.isEmpty()) new Thread(() -> ShareSync.delete(user, pass, oldHref)).start();
-                    go(4);
-                    startSync(false);
-                })
-                .setNegativeButton("取消", null).show();
-    }
-
-    void logout() {
-        new AlertDialog.Builder(this)
-                .setMessage("退出登录后不再同步，你自己的文章和生词都会保留在手机上。确定退出？")
-                .setPositiveButton("退出", (d, w) -> {
-                    Schedules.prefs(this).edit().putString("sync_pass", "").apply();
-                    clearFriends();
-                    lastUploaded = "";
-                    lastSyncMsg = "";
-                    ownChecked = false;
-                    go(4);
-                })
-                .setNegativeButton("取消", null).show();
-    }
-
     String statusText() {
         if (syncing) return "正在同步…";
         if (!lastSyncMsg.isEmpty()) return lastSyncMsg;
         long t = Schedules.prefs(this).getLong("last_sync", 0);
-        if (t > 0) return "已同步 · 上次 " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.ROOT).format(new Date(t)) + " · 好友 " + friends.size() + " 人";
+        if (t > 0) return "已同步 · 上次 " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.ROOT).format(new Date(t))
+                + (deviceCount > 0 ? " · 共 " + deviceCount + " 台设备" : "")
+                + (ShareSync.friendFolder(this).isEmpty() ? "" : " · 好友 " + friends.size() + " 人");
         return "还没有同步";
     }
 
@@ -1281,106 +1274,101 @@ public class MainActivity extends Activity {
         syncStatus.setTextColor(lastSyncMsg.isEmpty() ? BLUE : RED);
     }
 
-    String myJson() {
-        try {
-            String nick = ShareSync.nick(this);
-            JSONObject o = new JSONObject();
-            o.put("Owner", nick);
-            o.put("Device", ShareSync.device(this));
-            JSONObject vocab = new JSONObject();
-            for (String[] w : db.words("")) {
-                JSONObject x = new JSONObject();
-                x.put("Word", w[1]);
-                x.put("Zh", w[2]);
-                x.put("Phonetic", w[7]);
-                x.put("Context", w[3]);
-                x.put("Source", w[4]);
-                x.put("Added", w[5]);
-                x.put("Mastered", "1".equals(w[6]));
-                x.put("Modified", 0);
-                x.put("AddedBy", nick);
-                vocab.put(w[1].toLowerCase(Locale.ROOT), x);
-            }
-            o.put("Vocab", vocab);
-            JSONArray arts = new JSONArray();
-            for (String[] a : db.arts()) {
-                JSONObject x = new JSONObject();
-                x.put("Id", "m" + a[0]);
-                x.put("Title", a[1]);
-                x.put("Content", a[2]);
-                x.put("Date", a[3]);
-                x.put("Modified", 0);
-                x.put("AddedBy", nick);
-                arts.put(x);
-            }
-            o.put("Articles", arts);
-            return o.toString();
-        } catch (JSONException e) {
-            return "";
-        }
+    ShareSync.Doc localDoc() {
+        ShareSync.Doc d = db.export();
+        d.owner = ShareSync.nick(this);
+        d.device = ShareSync.device(this);
+        d.account = ShareSync.accountId(ShareSync.user(this));
+        return ShareSync.merge(d, new ShareSync.Doc());   // same ordering as merged results, so equal data gives equal JSON
     }
 
     void startSync(boolean manual) {
-        if (!ShareSync.ready(this) || syncing) return;
+        if (!ShareSync.loggedIn(this) || syncing) return;
         final String user = ShareSync.user(this), pass = ShareSync.pass(this);
         if (pass.isEmpty()) {
             lastSyncMsg = "保存的密码读取失败，请退出登录后重新登录。";
             updateStatus();
             return;
         }
-        final String body = myJson();
-        if (body.isEmpty()) return;
+        final String snap = localDoc().json();
+        if (snap.isEmpty()) return;
         syncing = true;
         final long ver = Db.version;
-        final String prev = lastUploaded;
-        final String folder = ShareSync.folder(this), nick = ShareSync.nick(this);
-        final String mine = ShareSync.fileFor(user, nick), dev = ShareSync.device(this);
-        final boolean check = !ownChecked;
-        final Map<String, String> old = new HashMap<>(stamps);
+        final ShareSync.Doc local = ShareSync.Doc.parse(snap);
+        final String prevOwn = lastOwn, prevFriend = lastFriend;
+        final String nick = ShareSync.nick(this), dev = ShareSync.device(this), ff = ShareSync.friendFolder(this);
+        final Map<String, ShareSync.Doc> known = new HashMap<>(devices);
+        final Map<String, String> ds = new HashMap<>(devStamps), fs = new HashMap<>(friendStamps);
         updateStatus();
         new Thread(() -> {
-            ShareSync.Result r = ShareSync.run(user, pass, folder, mine, nick, dev, body, prev, check, old);
-            runOnUiThread(() -> finishSync(r, ver, manual));
+            ShareSync.Result r = ShareSync.run(user, pass, dev, nick, local, prevOwn, known, ds, ff, prevFriend, fs);
+            runOnUiThread(() -> finishSync(r, snap, ver, manual));
         }).start();
     }
 
-    void finishSync(ShareSync.Result r, long ver, boolean manual) {
+    void finishSync(ShareSync.Result r, String snap, long ver, boolean manual) {
         syncing = false;
         long now = System.currentTimeMillis();
-        if (r.checked) ownChecked = true;
-        if (r.uploaded != null) lastUploaded = r.uploaded;
-        if (r.error != null) {
-            lastSyncMsg = "同步失败：" + r.error;
+        if (r.uploadedOwn != null) lastOwn = r.uploadedOwn;
+        if (r.error != null || r.merged == null) {
+            lastSyncMsg = "同步失败：" + (r.error == null ? "未知错误" : r.error);
             nextPull = now + 60000;
             updateStatus();
-            if (manual) alert("同步失败", r.error);
+            if (manual) alert("同步失败", r.error == null ? "未知错误" : r.error);
             return;
         }
-        syncedVersion = ver;
+        devices.putAll(r.gotDevices);
+        devices.keySet().retainAll(r.deviceStamps.keySet());
+        devStamps = r.deviceStamps;
+        deviceCount = r.devices;
+        if (r.uploadedFriend != null) lastFriend = r.uploadedFriend;
+
+        boolean dataChanged = false;
+        String mergedJson = r.merged.json();
+        if (!mergedJson.equals(snap)) {
+            ShareSync.Doc liveDoc = localDoc();
+            String live = liveDoc.json();
+            ShareSync.Doc m = live.equals(snap) ? r.merged : ShareSync.merge(liveDoc, r.merged);
+            db.apply(m);
+            dataChanged = true;
+            syncedVersion = live.equals(snap) ? Db.version : ver;
+        } else {
+            syncedVersion = ver;
+        }
         nextPull = now + 120000;
         lastSyncMsg = "";
-        boolean changed = !r.got.isEmpty();
-        if (r.present != null) {
+
+        boolean fchanged = !r.gotFriends.isEmpty();
+        if (r.friendPresent != null) {
             for (String k : new ArrayList<>(friends.keySet())) {
-                if (!r.present.contains(k)) { friends.remove(k); changed = true; }
+                if (!r.friendPresent.contains(k)) { friends.remove(k); fchanged = true; }
             }
+            friends.putAll(r.gotFriends);
+            friendStamps = r.friendStamps;
+            if (fchanged) ShareSync.saveCache(this, friends);
         }
-        friends.putAll(r.got);
-        stamps = r.stamps;
-        if (changed) ShareSync.saveCache(this, friends);
         Schedules.prefs(this).edit().putLong("last_sync", now).apply();
-        if (tab == 4 && changed) {
-            // refresh the list but keep the scroll position
-            int y = scroll.getScrollY();
-            go(4);
-            scroll.post(() -> scroll.scrollTo(0, y));
-        } else updateStatus();
+
+        if (dataChanged) WordWidget.refresh(this);
+        refreshAfterSync(dataChanged, fchanged);
         if (manual && tab == 4) toast("同步完成");
+    }
+
+    /** redraw the current page after a sync, keeping the scroll position */
+    void refreshAfterSync(boolean dataChanged, boolean friendsChanged) {
+        if (dragging) { updateStatus(); return; }
+        int y = scroll.getScrollY();
+        boolean redraw = false;
+        if (tab == 4 && (friendsChanged || dataChanged) && !choosingFolder) { go(4); redraw = true; }
+        else if (dataChanged && tab == 0 && openArticle == null) { home(); redraw = true; }
+        else if (dataChanged && tab == 1) { words(); redraw = true; }
+        if (redraw) scroll.post(() -> scroll.scrollTo(0, y));
+        else updateStatus();
     }
 
     void syncTick() {
         h.removeCallbacks(syncTickR);
-        if (ShareSync.ready(this) && !syncing && !dragging) {
+        if (ShareSync.loggedIn(this) && !syncing && !dragging) {
             long now = System.currentTimeMillis();
             boolean dirty = Db.version != syncedVersion && now - Db.changedAt > 4000 && lastSyncMsg.isEmpty();
             if (dirty || now > nextPull) startSync(false);
