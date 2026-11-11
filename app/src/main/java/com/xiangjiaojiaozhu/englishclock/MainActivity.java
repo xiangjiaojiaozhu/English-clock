@@ -8,6 +8,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -23,11 +25,13 @@ import android.text.method.LinkMovementMethod;
 import android.text.style.BackgroundColorSpan;
 import android.text.style.ClickableSpan;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -72,6 +76,12 @@ public class MainActivity extends Activity {
     int tab = 0;
     final Handler h = new Handler(Looper.getMainLooper());
 
+    // fast-scroll handle on the right edge
+    View thumb;
+    boolean dragging;
+    float dragStartY;
+    int dragStartScroll;
+
     TextView clock;
     Button startBtn;
     int focusMin = 25;
@@ -87,6 +97,7 @@ public class MainActivity extends Activity {
     Map<String, String> stamps = new HashMap<>();
     TextView syncStatus;
     LinearLayout friendList;
+    View friendArtHeader;
     String curFriendKey = null, friendQuery = "";
     final Runnable syncTickR = this::syncTick;
 
@@ -227,12 +238,16 @@ public class MainActivity extends Activity {
         brand.setPadding(dp(20), dp(14), dp(20), dp(2));
         root.addView(brand);
 
+        FrameLayout wrap = new FrameLayout(this);
         scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding(dp(16), 0, dp(16), dp(24));
         scroll.addView(body);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        wrap.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        setupFastScroll(wrap);
+        root.addView(wrap, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout nav = row();
         nav.setBackgroundResource(R.drawable.nav_bg);
@@ -255,6 +270,77 @@ public class MainActivity extends Activity {
         setContentView(root);
     }
 
+    // ---------------------------------------------------------------- fast scroll
+    // A handle on the right edge: drag it with one finger to jump through long pages.
+    void setupFastScroll(FrameLayout wrap) {
+        GradientDrawable bar = new GradientDrawable();
+        bar.setColor(0xFF7F8BA0);
+        bar.setCornerRadius(dp(4));
+        thumb = new View(this);
+        // 30dp wide touch area, only the right 7dp is drawn
+        thumb.setBackground(new InsetDrawable(bar, dp(21), dp(2), dp(2), dp(2)));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(30), dp(64), Gravity.END | Gravity.TOP);
+        wrap.addView(thumb, lp);
+        thumb.setVisibility(View.GONE);
+        thumb.setAlpha(0.6f);
+
+        thumb.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    dragging = true;
+                    dragStartY = e.getRawY();
+                    dragStartScroll = scroll.getScrollY();
+                    thumb.setAlpha(1f);
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                    return true;
+                case MotionEvent.ACTION_MOVE: {
+                    int track = scroll.getHeight() - thumb.getHeight();
+                    int range = body.getHeight() - scroll.getHeight();
+                    if (track > 0 && range > 0) {
+                        float dy = e.getRawY() - dragStartY;
+                        int y = Math.round(dragStartScroll + dy * range / track);
+                        scroll.scrollTo(0, Math.max(0, Math.min(range, y)));
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    dragging = false;
+                    thumb.setAlpha(0.6f);
+                    return true;
+            }
+            return false;
+        });
+        scroll.setOnScrollChangeListener((v, x, y, ox, oy) -> updateThumb());
+        body.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> thumb.post(this::updateThumb));
+    }
+
+    void updateThumb() {
+        if (thumb == null) return;
+        int view = scroll.getHeight(), content = body.getHeight();
+        if (view <= 0 || content < view * 1.6f) {
+            if (thumb.getVisibility() != View.GONE) thumb.setVisibility(View.GONE);
+            return;
+        }
+        if (thumb.getVisibility() != View.VISIBLE) thumb.setVisibility(View.VISIBLE);
+        int track = view - thumb.getHeight();
+        int range = content - view;
+        float y = range <= 0 ? 0 : (float) scroll.getScrollY() * track / range;
+        thumb.setTranslationY(Math.max(0, Math.min(track, y)));
+    }
+
+    /** smooth-scroll so that v (anywhere inside body) is at the top of the screen */
+    void scrollToView(View v) {
+        int y = 0;
+        View c = v;
+        while (c != null && c != body) {
+            y += c.getTop();
+            if (!(c.getParent() instanceof View)) break;
+            c = (View) c.getParent();
+        }
+        scroll.smoothScrollTo(0, Math.max(0, y - dp(8)));
+    }
+
     void go(int k) {
         tab = k;
         for (int i = 0; i < tabs.length; i++) {
@@ -263,6 +349,7 @@ public class MainActivity extends Activity {
         }
         syncStatus = null;
         friendList = null;
+        friendArtHeader = null;
         if (k == 0) home();
         if (k == 1) words();
         if (k == 2) focus();
@@ -457,7 +544,6 @@ public class MainActivity extends Activity {
         return r.length() > 240 ? r.substring(0, 240) + "…" : r;
     }
 
-    /** phonetic (offline dictionary first) + Chinese meaning for a newly added word */
     void lookupNew(String word) {
         new Thread(() -> {
             String ph = Phonetic.lookup(this, word);
@@ -742,6 +828,7 @@ public class MainActivity extends Activity {
     void showShare() {
         syncStatus = null;
         friendList = null;
+        friendArtHeader = null;
         if (!ShareSync.loggedIn(this)) shareLogin();
         else if (ShareSync.folder(this).isEmpty()) shareFolders();
         else shareFriends();
@@ -751,7 +838,6 @@ public class MainActivity extends Activity {
         return new LinearLayout.LayoutParams(-1, -2);
     }
 
-    // ---------- 1. login
     void shareLogin() {
         head("共享", "登录坚果云，和朋友互相看生词本。");
         LinearLayout c = card();
@@ -827,7 +913,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // ---------- 2. choose folder
     void shareFolders() {
         head("选择共享文件夹", "已登录：" + ShareSync.user(this) + " · 昵称：" + ShareSync.nick(this));
         body.addView(hint("【共用一个账号】第一个人点「新建共享文件夹」；第二个人点「刷新」，选中同一个文件夹即可，不用邀请。\n"
@@ -921,7 +1006,6 @@ public class MainActivity extends Activity {
         ShareSync.saveCache(this, friends);
     }
 
-    // ---------- 3. friend's word book
     void shareFriends() {
         head("共享", "昵称：" + ShareSync.nick(this) + " · 文件夹：" + ShareSync.folderName(this));
         syncStatus = text("", 14, BLUE);
@@ -958,7 +1042,8 @@ public class MainActivity extends Activity {
             JSONObject f = friends.get(keys.get(i));
             String owner = f.optString("Owner", "");
             JSONObject v = f.optJSONObject("Vocab");
-            labels.add((owner.isEmpty() ? "（未命名）" : owner) + " · " + (v == null ? 0 : v.length()) + " 个词");
+            JSONArray a = f.optJSONArray("Articles");
+            labels.add((owner.isEmpty() ? "（未命名）" : owner) + " · " + (v == null ? 0 : v.length()) + " 词 · " + (a == null ? 0 : a.length()) + " 篇");
             if (keys.get(i).equals(curFriendKey)) sel = i;
         }
         curFriendKey = keys.get(sel);
@@ -993,7 +1078,11 @@ public class MainActivity extends Activity {
         });
         body.addView(q, full());
         LinearLayout r3 = row();
-        r3.addView(primary("全部加入我的生词本", v -> addAllFriend()), weight(1));
+        r3.addView(primary("全部加入生词本", v -> addAllFriend()), weight(1));
+        r3.addView(soft("跳到好友文章 ↓", v -> {
+            if (friendArtHeader != null) scrollToView(friendArtHeader);
+            else toast("这位好友还没有文章");
+        }), weight(1));
         body.addView(r3, full());
 
         friendList = new LinearLayout(this);
@@ -1007,7 +1096,6 @@ public class MainActivity extends Activity {
         return o.isEmpty() ? "好友" : o;
     }
 
-    /** word rows of the current friend: key, word, zh, phonetic, context, added */
     ArrayList<String[]> friendWords() {
         ArrayList<String[]> out = new ArrayList<>();
         JSONObject f = curFriendKey == null ? null : friends.get(curFriendKey);
@@ -1043,6 +1131,7 @@ public class MainActivity extends Activity {
     void renderFriend() {
         if (friendList == null) return;
         friendList.removeAllViews();
+        friendArtHeader = null;
         JSONObject f = curFriendKey == null ? null : friends.get(curFriendKey);
         if (f == null) return;
         String who = owner(f);
@@ -1050,7 +1139,7 @@ public class MainActivity extends Activity {
         HashSet<String> mine = db.wordSet();
         int have = 0;
         for (String[] w : ws) if (mine.contains(w[0].toLowerCase(Locale.ROOT))) have++;
-        friendList.addView(hint(who + " 的生词：显示 " + ws.size() + " 个，其中 " + have + " 个你已经有了。点「加入」复制到你的生词本。"));
+        friendList.addView(hint(who + " 的生词：显示 " + ws.size() + " 个，其中 " + have + " 个你已经有了。按住右边的灰色滑块上下拖，可以快速翻页。"));
         int shown = 0;
         for (String[] w : ws) {
             if (++shown > 400) { friendList.addView(hint("只显示前 400 个，可以用搜索找其他词。")); break; }
@@ -1069,7 +1158,7 @@ public class MainActivity extends Activity {
             else {
                 Button add = soft("加入", v -> addFriendWord(w, who));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(72), dp(40));
-                lp.setMargins(dp(8), 0, 0, 0);
+                lp.setMargins(dp(8), 0, dp(20), 0);   // keep clear of the fast-scroll handle
                 top.addView(add, lp);
             }
             c.addView(top);
@@ -1084,10 +1173,11 @@ public class MainActivity extends Activity {
 
         JSONArray arts = f.optJSONArray("Articles");
         if (arts != null && arts.length() > 0) {
-            TextView t = text(who + " 的文章", 18, NAVY);
+            TextView t = text(who + " 的文章（" + arts.length() + " 篇）", 18, NAVY);
             t.setTypeface(null, Typeface.BOLD);
             t.setPadding(dp(4), dp(16), dp(4), dp(4));
             friendList.addView(t);
+            friendArtHeader = t;
             for (int i = 0; i < arts.length(); i++) {
                 JSONObject a = arts.optJSONObject(i);
                 if (a == null) continue;
@@ -1105,15 +1195,20 @@ public class MainActivity extends Activity {
                 c.addView(r, full());
                 friendList.addView(c);
             }
+            LinearLayout r = row();
+            r.addView(soft("回到顶部 ↑", v -> scroll.smoothScrollTo(0, 0)), weight(1));
+            friendList.addView(r, full());
         }
     }
 
     void addFriendWord(String[] w, String who) {
+        int y = scroll.getScrollY();
         if (db.addFriendWord(w[1], w[2], w[3], w[4], "来自 " + who)) {
             toast("已加入：" + w[1]);
             WordWidget.refresh(this);
         } else toast("你已经有这个词了");
         renderFriend();
+        scroll.post(() -> scroll.scrollTo(0, y));   // stay where you were
     }
 
     void addAllFriend() {
@@ -1186,7 +1281,6 @@ public class MainActivity extends Activity {
         syncStatus.setTextColor(lastSyncMsg.isEmpty() ? BLUE : RED);
     }
 
-    /** my own data in the same JSON format as the desktop version */
     String myJson() {
         try {
             String nick = ShareSync.nick(this);
@@ -1275,15 +1369,18 @@ public class MainActivity extends Activity {
         stamps = r.stamps;
         if (changed) ShareSync.saveCache(this, friends);
         Schedules.prefs(this).edit().putLong("last_sync", now).apply();
-        if (tab == 4 && changed) go(4);
-        else updateStatus();
+        if (tab == 4 && changed) {
+            // refresh the list but keep the scroll position
+            int y = scroll.getScrollY();
+            go(4);
+            scroll.post(() -> scroll.scrollTo(0, y));
+        } else updateStatus();
         if (manual && tab == 4) toast("同步完成");
     }
 
-    /** runs every 3 s while the app is open */
     void syncTick() {
         h.removeCallbacks(syncTickR);
-        if (ShareSync.ready(this) && !syncing) {
+        if (ShareSync.ready(this) && !syncing && !dragging) {
             long now = System.currentTimeMillis();
             boolean dirty = Db.version != syncedVersion && now - Db.changedAt > 4000 && lastSyncMsg.isEmpty();
             if (dirty || now > nextPull) startSync(false);
